@@ -23,13 +23,14 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 
 /// @author Frax Finance: https://github.com/FraxFinance
 contract FraxtalHop is Ownable2Step, IOAppComposer {
-    address constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
+    address public constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
 
     bool public paused = false;
     mapping(uint32 => bytes32) public remoteHop;
     mapping(bytes32 => bool) public messageProcessed;
 
     event Hop(address oft, uint32 indexed srcEid, uint32 indexed dstEid, bytes32 indexed recipient, uint256 amount);
+    event MessageHash(address oft, uint32 indexed srcEid, uint64 indexed nonce, bytes32 indexed composeFrom);
 
     error InvalidOApp();
     error HopPaused();
@@ -40,12 +41,12 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
     constructor() Ownable(msg.sender) {}
 
     // Admin functions
-    function recoverERC20(address tokenAddress, uint256 tokenAmount) external onlyOwner {
-        IERC20(tokenAddress).transfer(msg.sender, tokenAmount);
+    function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external onlyOwner {
+        IERC20(tokenAddress).transfer(recipient, tokenAmount);
     }
 
-    function recoverETH(uint256 tokenAmount) external onlyOwner {
-        payable(msg.sender).transfer(tokenAmount);
+    function recoverETH(address recipient, uint256 tokenAmount) external onlyOwner {
+        payable(recipient).transfer(tokenAmount);
     }
 
     function setRemoteHop(uint32 _eid, address _remoteHop) external {
@@ -85,7 +86,9 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
         {
             bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(_message);
             uint64 nonce = OFTComposeMsgCodec.nonce(_message);
-            bytes32 messageHash = keccak256(abi.encodePacked(srcEid, nonce, composeFrom));
+            bytes32 messageHash = keccak256(abi.encodePacked(_oft, srcEid, nonce, composeFrom));
+
+            emit MessageHash(_oft, srcEid, nonce, composeFrom);
             // Avoid duplicated messages
             if (!messageProcessed[messageHash]) {
                 messageProcessed[messageHash] = true;
@@ -156,8 +159,9 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
     }
 
     // Owner functions
-    function setMessageProcessed(uint32 srcEid, uint64 nonce, bytes32 composeFrom) external onlyOwner {
-        bytes32 messageHash = keccak256(abi.encodePacked(srcEid, nonce, composeFrom));
+    function setMessageProcessed(address oft, uint32 srcEid, uint64 nonce, bytes32 composeFrom) external onlyOwner {
+        bytes32 messageHash = keccak256(abi.encodePacked(oft, srcEid, nonce, composeFrom));
+        emit MessageHash(oft, srcEid, nonce, composeFrom);
         messageProcessed[messageHash] = true;
     }
 }
