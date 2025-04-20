@@ -124,6 +124,7 @@ contract RemoteHop is Ownable2Step {
         IOFT(_oft).send{ value: fee.nativeFee }(sendParam, fee, address(this));
 
         // Refund the excess
+        if (msg.value < fee.nativeFee) revert InsufficientFee();
         if (msg.value > fee.nativeFee) {
             (bool success, ) = address(msg.sender).call{ value: msg.value - fee.nativeFee }("");
             if (!success) revert RefundFailed();
