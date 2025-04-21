@@ -98,7 +98,7 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
         {
             bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(_message);
             uint64 nonce = OFTComposeMsgCodec.nonce(_message);
-            bytes32 messageHash = keccak256(abi.encodePacked(_oft, srcEid, nonce, composeFrom));
+            bytes32 messageHash = keccak256(abi.encode(_oft, srcEid, nonce, composeFrom));
 
             emit MessageHash(_oft, srcEid, nonce, composeFrom);
             // Avoid duplicated messages
