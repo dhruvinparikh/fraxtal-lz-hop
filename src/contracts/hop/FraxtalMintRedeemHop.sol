@@ -100,6 +100,7 @@ contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
         if (msg.sender != ENDPOINT) revert NotEndpoint();
         if (paused) revert HopPaused();
         if (_oft != frxUsdLockbox && _oft != sfrxUsdLockbox) revert InvalidOFT();
+        if (_oft == address(0)) revert InvalidOFT();
 
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
         {
