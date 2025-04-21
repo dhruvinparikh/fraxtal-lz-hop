@@ -28,18 +28,23 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
     bool public paused = false;
     mapping(uint32 => bytes32) public remoteHop;
     mapping(bytes32 => bool) public messageProcessed;
+    mapping(address => bool) public approvedOft;
 
     event Hop(address oft, uint32 indexed srcEid, uint32 indexed dstEid, bytes32 indexed recipient, uint256 amount);
     event MessageHash(address oft, uint32 indexed srcEid, uint64 indexed nonce, bytes32 indexed composeFrom);
 
-    error InvalidOApp();
+    error InvalidOFT();
     error HopPaused();
     error NotEndpoint();
     error InvalidSourceChain();
     error InvalidSourceHop();
     error ZeroAmountSend();
 
-    constructor() Ownable(msg.sender) {}
+    constructor(address[] memory _approvedOfts) Ownable(msg.sender) {
+        for (uint256 i = 0; i < _approvedOfts.length; i++) {
+            approvedOft[_approvedOfts[i]] = true;
+        }
+    }
 
     // Admin functions
     function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external onlyOwner {
@@ -60,6 +65,10 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
 
     function pause(bool _paused) external onlyOwner {
         paused = _paused;
+    }
+
+    function toggleOFTApproval(address oft, bool approved) external onlyOwner {
+        approvedOft[oft] = approved;
     }
 
     // receive ETH
@@ -83,6 +92,8 @@ contract FraxtalHop is Ownable2Step, IOAppComposer {
     ) external payable override {
         if (msg.sender != ENDPOINT) revert NotEndpoint();
         if (paused) revert HopPaused();
+        if (!approvedOft[_oft]) revert InvalidOFT();
+
         uint32 srcEid = OFTComposeMsgCodec.srcEid(_message);
         {
             bytes32 composeFrom = OFTComposeMsgCodec.composeFrom(_message);

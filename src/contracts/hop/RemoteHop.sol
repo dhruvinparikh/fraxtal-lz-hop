@@ -31,6 +31,7 @@ contract RemoteHop is Ownable2Step {
     uint256 public numDVNs = 2;
     uint256 public hopFee = 1; // 10000 based so 1 = 0.01%
     mapping(uint32 => bytes) public executorOptions;
+    mapping(address => bool) public approvedOft;
 
     address public immutable EXECUTOR;
     address public immutable DVN;
@@ -38,7 +39,7 @@ contract RemoteHop is Ownable2Step {
 
     event SendOFT(address oft, address indexed sender, uint32 indexed dstEid, bytes32 indexed to, uint256 amountLD);
 
-    error InvalidOApp();
+    error InvalidOFT();
     error HopPaused();
     error NotEndpoint();
     error InsufficientFee();
@@ -50,13 +51,18 @@ contract RemoteHop is Ownable2Step {
         uint256 _numDVNs,
         address _EXECUTOR,
         address _DVN,
-        address _TREASURY
+        address _TREASURY,
+        address[] memory _approvedOfts
     ) Ownable(msg.sender) {
         fraxtalHop = _fraxtalHop;
         numDVNs = _numDVNs;
         EXECUTOR = _EXECUTOR;
         DVN = _DVN;
         TREASURY = _TREASURY;
+
+        for (uint256 i = 0; i < _approvedOfts.length; i++) {
+            approvedOft[_approvedOfts[i]] = true;
+        }
     }
 
     // Admin functions
@@ -92,11 +98,17 @@ contract RemoteHop is Ownable2Step {
         paused = _paused;
     }
 
+    function toggleOFTApproval(address _oft, bool _approved) external onlyOwner {
+        approvedOft[_oft] = _approved;
+    }
+
     // receive ETH
     receive() external payable {}
 
     function sendOFT(address _oft, uint32 _dstEid, bytes32 _to, uint256 _amountLD) external payable {
         if (paused) revert HopPaused();
+        if (!approvedOft[_oft]) revert InvalidOFT();
+
         _amountLD = removeDust(_oft, _amountLD);
         if (_amountLD == 0) revert ZeroAmountSend();
         SafeERC20.safeTransferFrom(IERC20(IOFT(_oft).token()), msg.sender, address(this), _amountLD);
