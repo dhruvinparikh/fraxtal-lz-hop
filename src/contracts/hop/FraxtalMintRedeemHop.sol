@@ -118,8 +118,6 @@ contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
             IERC20(IOFT(sfrxUsdLockbox).token()).approve(address(fraxtalERC4626MintRedeemer), amount);
             amount = fraxtalERC4626MintRedeemer.redeem(amount, address(this), address(this));
             _oft = frxUsdLockbox;
-        } else {
-            // Do not revert, but send back the token
         }
 
         SafeERC20.forceApprove(IERC20(IOFT(_oft).token()), _oft, amount);
