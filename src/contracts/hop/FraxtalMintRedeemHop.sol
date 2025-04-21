@@ -26,10 +26,10 @@ import { IFraxtalERC4626MintRedeemer } from "src/contracts/interfaces/IFraxtalER
 contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
     IFraxtalERC4626MintRedeemer public constant fraxtalERC4626MintRedeemer =
         IFraxtalERC4626MintRedeemer(0xBFc4D34Db83553725eC6c768da71D2D9c1456B55);
-    address public constant frxUsdLockbox = 0x96A394058E2b84A89bac9667B19661Ed003cF5D4;
-    address public constant sfrxUsdLockbox = 0x88Aa7854D3b2dAA5e37E7Ce73A1F39669623a361;
     address public constant ENDPOINT = 0x1a44076050125825900e736c501f859c50fE728c;
 
+    address public frxUsdLockbox;
+    address public sfrxUsdLockbox;
     bool public paused = false;
     mapping(uint32 => bytes32) public remoteHop;
     mapping(bytes32 => bool) public messageProcessed;
@@ -44,7 +44,10 @@ contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
     error InvalidSourceHop();
     error ZeroAmountSend();
 
-    constructor() Ownable(msg.sender) {}
+    constructor(address _frxUsdLockbox, address _sfrxUsdLockbox) Ownable(msg.sender) {
+        frxUsdLockbox = _frxUsdLockbox;
+        sfrxUsdLockbox = _sfrxUsdLockbox;
+    }
 
     // Admin functions
     function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external onlyOwner {
@@ -65,6 +68,14 @@ contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
 
     function pause(bool _paused) external onlyOwner {
         paused = _paused;
+    }
+
+    function setFrxUsdLockbox(address _frxUsdLockbox) external onlyOwner {
+        frxUsdLockbox = _frxUsdLockbox;
+    }
+
+    function setSfrxUsdLockbox(address _sfrxUsdLockbox) external onlyOwner {
+        sfrxUsdLockbox = _sfrxUsdLockbox;
     }
 
     // receive ETH
@@ -114,7 +125,8 @@ contract FraxtalMintRedeemHop is Ownable2Step, IOAppComposer {
             IERC20(IOFT(frxUsdLockbox).token()).approve(address(fraxtalERC4626MintRedeemer), amount);
             amount = fraxtalERC4626MintRedeemer.deposit(amount, address(this));
             _oft = sfrxUsdLockbox;
-        } else if (_oft == sfrxUsdLockbox) {
+        } else {
+            // assumed to be sfrxUsdLockbox due to prior `InvalidOFT()` check
             IERC20(IOFT(sfrxUsdLockbox).token()).approve(address(fraxtalERC4626MintRedeemer), amount);
             amount = fraxtalERC4626MintRedeemer.redeem(amount, address(this), address(this));
             _oft = frxUsdLockbox;

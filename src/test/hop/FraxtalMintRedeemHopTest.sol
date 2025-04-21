@@ -17,13 +17,14 @@ contract FraxtalMintRedeemHopTest2 is BaseTest {
     address constant EXECUTOR = 0x41Bdb4aa4A63a5b2Efc531858d3118392B1A1C3d;
     address constant DVN = 0xcCE466a522984415bC91338c232d98869193D46e;
     address constant TREASURY = 0xc1B621b18187F74c8F6D52a6F709Dd2780C09821;
-
+    address constant frxUsdLockbox = 0x96A394058E2b84A89bac9667B19661Ed003cF5D4;
+    address constant sfrxUsdLockbox = 0x88Aa7854D3b2dAA5e37E7Ce73A1F39669623a361;
     // receive ETH
     receive() external payable {}
 
     function setUpFraxtal() public virtual {
         vm.createSelectFork(vm.envString("FRAXTAL_MAINNET_URL"), 17180177);
-        hop = new FraxtalMintRedeemHop();
+        hop = new FraxtalMintRedeemHop(frxUsdLockbox, sfrxUsdLockbox);
         remoteHop = new RemoteMintRedeemHop(
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,
@@ -41,7 +42,7 @@ contract FraxtalMintRedeemHopTest2 is BaseTest {
 
     function setupArbitrum() public {
         vm.createSelectFork(vm.envString("ARBITRUM_MAINNET_URL"), 316670752);
-        hop = new FraxtalMintRedeemHop();
+        hop = new FraxtalMintRedeemHop(frxUsdLockbox, sfrxUsdLockbox);
         remoteHop = new RemoteMintRedeemHop(
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,
@@ -56,7 +57,7 @@ contract FraxtalMintRedeemHopTest2 is BaseTest {
 
     function setupEthereum() public {
         vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_URL"), 22124168);
-        hop = new FraxtalMintRedeemHop();
+        hop = new FraxtalMintRedeemHop(frxUsdLockbox, sfrxUsdLockbox);
         remoteHop = new RemoteMintRedeemHop(
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,

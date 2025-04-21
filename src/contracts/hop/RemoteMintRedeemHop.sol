@@ -35,8 +35,8 @@ contract RemoteMintRedeemHop is Ownable2Step {
     address public immutable DVN;
     address public immutable TREASURY;
     uint32 public immutable EID;
-    address public immutable frxUsdOft;
-    address public immutable sfrxUsdOft;
+    address public frxUsdOft;
+    address public sfrxUsdOft;
 
     event MintRedeem(address oft, address indexed sender, uint256 amountLD);
 
@@ -94,6 +94,14 @@ contract RemoteMintRedeemHop is Ownable2Step {
 
     function pause(bool _paused) external onlyOwner {
         paused = _paused;
+    }
+
+    function setFrxUsdOft(address _frxUsdOft) external onlyOwner {
+        frxUsdOft = _frxUsdOft;
+    }
+
+    function setSfrxUsdOft(address _sfrxUsdOft) external onlyOwner {
+        sfrxUsdOft = _sfrxUsdOft;
     }
 
     // receive ETH
