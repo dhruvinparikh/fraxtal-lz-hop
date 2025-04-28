@@ -3,13 +3,13 @@ pragma solidity 0.8.23;
 
 import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 
-// forge script src/script/hop/Remote/DeployRemoteHopArbitrum.sol --rpc-url https://arb1.arbitrum.io/rpc --broadcast --verify --verifier etherscan --etherscan-api-key $ARBISCAN_API_KEY
-contract DeployRemoteHopArbitrum is DeployRemoteHop {
+// forge script src/script/hop/Remote/DeployRemoteHopOptimism.sol --rpc-url https://optimism-mainnet.public.blastapi.io --broadcast --verify --verifier etherscan --etherscan-api-key $OPTIMISM_API_KEY
+contract DeployRemoteHopOptimism is DeployRemoteHop {
     constructor() {
-        EXECUTOR = 0x31CAe3B7fB82d847621859fb1585353c5720660D;
-        DVN = 0x2f55C492897526677C5B68fb199ea31E2c126416;
-        TREASURY = 0x532410B245eB41f24Ed1179BA0f6ffD94738AE70;
-        EID = 30110;
+        EXECUTOR = 0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e;
+        DVN = 0x6A02D83e8d433304bba74EF1c427913958187142;
+        TREASURY = 0x6c26c61a97006888ea9E4FA36584c7df57Cd9dA3;
+        EID = 30111;
 
         frxUsdOft = 0x80Eede496655FB9047dd39d9f418d5483ED600df;
         sfrxUsdOft = 0x5Bff88cA1442c2496f7E475E9e7786383Bc070c0;

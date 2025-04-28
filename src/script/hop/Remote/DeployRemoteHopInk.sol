@@ -3,13 +3,13 @@ pragma solidity 0.8.23;
 
 import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 
-// forge script src/script/hop/Remote/DeployRemoteHopArbitrum.sol --rpc-url https://arb1.arbitrum.io/rpc --broadcast --verify --verifier etherscan --etherscan-api-key $ARBISCAN_API_KEY
-contract DeployRemoteHopArbitrum is DeployRemoteHop {
+// forge script src/script/hop/Remote/DeployRemoteHopInk.sol --rpc-url https://rpc-gel.inkonchain.com --broadcast --verify --verifier blockscout --verifier-url https://explorer.inkonchain.com/api/
+contract DeployRemoteHopInk is DeployRemoteHop {
     constructor() {
-        EXECUTOR = 0x31CAe3B7fB82d847621859fb1585353c5720660D;
-        DVN = 0x2f55C492897526677C5B68fb199ea31E2c126416;
-        TREASURY = 0x532410B245eB41f24Ed1179BA0f6ffD94738AE70;
-        EID = 30110;
+        EXECUTOR = 0xFEbCF17b11376C724AB5a5229803C6e838b6eAe5;
+        DVN = 0x174F2bA26f8ADeAfA82663bcf908288d5DbCa649;
+        TREASURY = 0x665bd7A4b5765758ccF1eB5b6dEAf6bb07b6c531;
+        EID = 30339;
 
         frxUsdOft = 0x80Eede496655FB9047dd39d9f418d5483ED600df;
         sfrxUsdOft = 0x5Bff88cA1442c2496f7E475E9e7786383Bc070c0;
