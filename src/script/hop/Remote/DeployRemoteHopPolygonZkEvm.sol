@@ -3,7 +3,7 @@ pragma solidity 0.8.23;
 
 import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 
-// forge script src/script/hop/Remote/DeployRemoteHopPolygonZkEvm.sol --rpc-url https://polygon-rpc.com --broadcast --verify --verifier etherscan --etherscan-api-key $POLYGONSCAN_API_KEY
+// forge script src/script/hop/Remote/DeployRemoteHopPolygonZkEvm.sol --rpc-url https://zkevm-rpc.com --broadcast --verify --verifier etherscan --etherscan-api-key $ZKPOLYGONSCAN_API_KEY
 contract DeployRemoteHopPolygonZkEvm is DeployRemoteHop {
     constructor() {
         EXECUTOR = 0xbE4fB271cfB7bcbB47EA9573321c7bfe309fc220;

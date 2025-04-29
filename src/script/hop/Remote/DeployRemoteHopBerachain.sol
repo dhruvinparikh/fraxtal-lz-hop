@@ -3,7 +3,7 @@ pragma solidity 0.8.23;
 
 import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 
-// forge script src/script/hop/Remote/DeployRemoteHopBerachain.sol -rpc-url https://rpc.berachain.com --broadcast --verify --verifier etherscan --etherscan-api-key $BERACHAIN_API_KEY
+// forge script src/script/hop/Remote/DeployRemoteHopBerachain.sol --rpc-url https://rpc.berachain.com --broadcast --verify --verifier etherscan --etherscan-api-key $BERACHAIN_API_KEY
 contract DeployRemoteHopBerachain is DeployRemoteHop {
     constructor() {
         EXECUTOR = 0x4208D6E27538189bB48E603D6123A94b8Abe0A0b;
