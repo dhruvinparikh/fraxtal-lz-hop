@@ -1,6 +1,6 @@
 ## Specification
 ### RemoteHop
-**Goal:** User wants to move [(s)frxUSD, (s)frxETH, FXS, FPI] from chain A to chain B via LZ.
+**Purpose:** User wants to move [(s)frxUSD, (s)frxETH, FXS, FPI] from chain A to chain B via LZ.
 1. User sends OFT to RemoteHop on Chain A
    - If `Chain B == Fraxtal`
         1. Chain A RemoteHop sends OFT to recipient on Fraxtal
@@ -9,7 +9,7 @@
         2. Fraxtal Remotehop sends OFT to recipient on chain B.
 
 ### MintRedeemHop
-**Goal:** User wants to convert their frxUSD to sfrxUSD (or vise versa) on chain A at the best provided rate
+**Purpose:** User wants to convert their frxUSD to sfrxUSD (or vise versa) on chain A at the best provided rate
 1. User sends OFT to MintRedeemHop on chain A
 3. Chain A MintRedeemHop sends OFT to Fraxtal MintRedeemHop
 4. Fraxtal MintRedeemHop either deposits or redeems (depending if the OFT is frxUSD or sfrxUSD) to the alternate OFT
@@ -35,13 +35,16 @@ interface IRemoteHop {
 interface IMintRedeemHop {
     function quote(address oft, bytes32 toAsBytes32, uint256 amount) external view returns (MessagingFee memory fee);
     function mintRedeem(address oft, uint256 amount) external payable;
+}s
 ```
 
 ### RemoteHop
 ```Solidity
-// Ethereum
-address oft = 0x566a6442A5A6e9895B9dCA97cC7879D632c6e4B0; // proxy frxUSD lockbox
-address remoteHop = 0x45C55fb1805d8AC7E5Ba0F933cB7D4Da0Dabd365; // See deployed contracts below
+// Ethereum WFRAX => (Fraxtal) => Sonic WFRAX
+
+// OFT address found @ https://docs.frax.com/protocol/crosschain/addresses
+address oft = 0x04ACaF8D2865c0714F79da09645C13FD2888977f; // WFRAX OFT
+address remoteHop = 0x3ad4dC2319394bB4BE99A0e4aE2AbF7bCEbD648E; // See deployed contracts below
 uint256 amount = 1e18;
 uint32 dstEid = 30332; // Sonic
 bytes32 to = bytes32(uint256(uint160(0xb0E1650A9760e0f383174af042091fc544b8356f))); // example
@@ -58,9 +61,11 @@ IRemoteHop(remoteHop).sendOFT{value: fee.nativeFee}(oft, dstEid, to, amount);
 
 ### MintRedeemHop
 ```Solidity
-// Sonic
+// Sonic frxUSD => (Fraxtal) => Sonic sfrxUSD
+
+// OFT address found @ https://docs.frax.com/protocol/crosschain/addresses
 address oft = 0x80Eede496655FB9047dd39d9f418d5483ED600df; // frxUSD OFT
-address mintRedeemHop = 0x79152c303AD5aE429eDefa4553CB1Ad2c6EE1396; // see deployed contracts below
+address mintRedeemHop = 0xf6115Bb9b6A4b3660dA409cB7afF1fb773efaD0b; // see deployed contracts below
 uint256 amount = 1e18;
 bytes32 to = bytes32(uint256(uint160(0xb0E1650A9760e0f383174af042091fc544b8356f))); // example
 
