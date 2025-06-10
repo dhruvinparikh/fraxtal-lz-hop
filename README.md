@@ -35,7 +35,7 @@ interface IRemoteHop {
 interface IMintRedeemHop {
     function quote(address oft, bytes32 toAsBytes32, uint256 amount) external view returns (MessagingFee memory fee);
     function mintRedeem(address oft, uint256 amount) external payable;
-}s
+}
 ```
 
 ### RemoteHop
@@ -80,6 +80,7 @@ IMintRedeemHop(mintRedeemHop).mintRedeem{value: fee.nativeFee}(oft, amount);
 ```
 
 ## Deployed Contracts
+### Mainnet
 | Chain | `RemoteHop` | `MintRedeemHop` |
 | --- | ---| ---|
 | Fraxtal | [`0x2A2019b30C157dB6c1C01306b8025167dBe1803B`](https://fraxscan.com/address/0x2A2019b30C157dB6c1C01306b8025167dBe1803B) | [`0x3e6a2cBaFD864e09e6DAb9Cf035a0AbEa32bc0BC`](https://fraxscan.com/address/0x3e6a2cBaFD864e09e6DAb9Cf035a0AbEa32bc0BC) |
@@ -102,3 +103,10 @@ IMintRedeemHop(mintRedeemHop).mintRedeem{value: fee.nativeFee}(oft, amount);
 | Abstract | [`0xc5e4a0cfef8d801278927c25fb51c1db7b69ddfb`](https://abscan.org/address/0xc5e4a0cfef8d801278927c25fb51c1db7b69ddfb) | [`0xa05e9f9b97c963b5651ed6a50fae46625a8c400b`](https://abscan.org/address/0xa05e9f9b97c963b5651ed6a50fae46625a8c400b) |
 | ZkSync | [`0xc5e4a0cfef8d801278927c25fb51c1db7b69ddfb`](https://era.zksync.network/address/0xc5e4a0cfef8d801278927c25fb51c1db7b69ddfb) | [`0xa05e9f9b97c963b5651ed6a50fae46625a8c400b`](https://era.zksync.network/address/0xa05e9f9b97c963b5651ed6a50fae46625a8c400b) |
 | Worldchain | [`0x938d99A81814f66b01010d19DDce92A633441699`](https://worldscan.org/address/0x938d99A81814f66b01010d19DDce92A633441699) | [`0x111ddab65Af5fF96b674400246699ED40F550De1`](https://worldscan.org/address/0x111ddab65Af5fF96b674400246699ED40F550De1) |
+
+### Testnet
+| Chain | `RemoteHop` |
+| --- | --- |
+| Fraxtal | [`0xd593Df4E2E3156C5707bB6AE4ba26fd4A9A04586`](https://holesky.fraxscan.com/address/0xd593Df4E2E3156C5707bB6AE4ba26fd4A9A04586) |
+| Eth Sepolia | [`0xa46A266dCBf199a71532c76967e200994C5A0D6d`](https://sepolia.etherscan.io/address/0xa46A266dCBf199a71532c76967e200994C5A0D6d) |
+| Arb Sepolia | [`0x7a07D606c87b7251c2953A30Fa445d8c5F856C7A`](https://sepolia.arbiscan.io/address/0x7a07D606c87b7251c2953A30Fa445d8c5F856C7A) |
