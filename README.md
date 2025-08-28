@@ -107,6 +107,7 @@ IMintRedeemHop(mintRedeemHop).mintRedeem{value: fee.nativeFee}(oft, amount);
 | Plume | [`0x6cA98f43719231d38F6426DB64C7F3D5C7CE7876`](https://explorer.plume.org/address/0x6cA98f43719231d38F6426DB64C7F3D5C7CE7876) | [`0xa71f2204EDDB8d84F411A0C712687FAe5002e7Fb`](https://explorer.plume.org/address/0xa71f2204EDDB8d84F411A0C712687FAe5002e7Fb) |
 |Scroll|[`0xF6f45CCB5E85D1400067ee66F9e168f83e86124E`](https://scrollscan.com/address/0xf6f45ccb5e85d1400067ee66f9e168f83e86124e)|[`0x91DDB0E0C36B901C6BF53B9Eb5ACa0Eb1465F558`](https://scrollscan.com/address/0x91ddb0e0c36b901c6bf53b9eb5aca0eb1465f558)|
 |Aurora|[`0x53e36c8380ff62d7964bfa4868a0045e58a52344`](https://explorer.aurora.dev/address/0x53e36C8380Ff62D7964BFa4868A0045E58A52344)|[`0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2`](https://explorer.aurora.dev/address/0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2)|
+| Katana | [`0x5d8EB59A12Bc98708702305A7b032f4b69Dd5b5c`](https://explorer.katanarpc.com/address/0x5d8EB59A12Bc98708702305A7b032f4b69Dd5b5c) | [`0xF6f45CCB5E85D1400067ee66F9e168f83e86124E`](https://explorer.katanarpc.com/address/0xF6f45CCB5E85D1400067ee66F9e168f83e86124E) |
 
 ### Testnet
 | Chain | `RemoteHop` |
