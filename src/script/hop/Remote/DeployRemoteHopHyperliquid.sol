@@ -3,7 +3,7 @@ pragma solidity 0.8.23;
 
 import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 
-// forge script src/script/hop/Remote/DeployRemoteHopHyperliquid.sol --rpc-url https://rpc.hyperliquid.xyz/evm --broadcast --verify --verifier etherscan --chain-id 999 --verifier-url https://api.etherscan.io/v2/api --etherscan-api-key $HYPEREVMSCAN_API_KEY
+// forge script src/script/hop/Remote/DeployRemoteHopHyperliquid.sol --rpc-url https://rpc.hyperliquid.xyz/evm --broadcast --verify --verifier etherscan --etherscan-api-key $HYPEREVMSCAN_API_KEY --chain-id 999 --verifier-url https://api.etherscan.io/v2/api
 contract DeployRemoteHopHyperliquid is DeployRemoteHop {
     constructor() {
         EXECUTOR = 0x41Bdb4aa4A63a5b2Efc531858d3118392B1A1C3d;
