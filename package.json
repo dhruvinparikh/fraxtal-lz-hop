@@ -20,6 +20,8 @@
   "license": "ISC",
   "devDependencies": {
     "@openzeppelin/contracts": "^5.4.0",
+    "@openzeppelin/contracts-4.8.1": "npm:@openzeppelin/contracts@4.8.1",
+    "@openzeppelin/contracts-upgradeable-4.8.1": "npm:@openzeppelin/contracts-upgradeable@4.8.1",
     "husky": "^8.0.3",
     "lint-staged": "^13.3.0",
     "prettier": "^3.6.2",
