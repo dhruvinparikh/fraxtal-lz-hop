@@ -61,7 +61,10 @@ abstract contract DeployRemoteHop is BaseScript {
 
         // initiate ownership transfer and set config for Solana
         remoteHop.transferOwnership(owner);
-        remoteHop.setExecutorOptions(30168, hex"0100210100000000000000000000000000030D40000000000000000000000000002DC6C0");
+        remoteHop.setExecutorOptions(
+            30168,
+            hex"0100210100000000000000000000000000030D40000000000000000000000000002DC6C0"
+        );
 
         RemoteMintRedeemHop remoteMintRedeemHop = new RemoteMintRedeemHop({
             _owner: owner,
