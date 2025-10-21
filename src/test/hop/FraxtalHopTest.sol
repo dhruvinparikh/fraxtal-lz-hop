@@ -33,7 +33,6 @@ contract FraxtalHopTest is BaseTest {
         vm.createSelectFork(vm.envString("FRAXTAL_MAINNET_URL"), 17180177);
         hop = new FraxtalHop(approvedOfts);
         remoteHop = new RemoteHop(
-            address(1),
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,
             EXECUTOR,
@@ -57,7 +56,6 @@ contract FraxtalHopTest is BaseTest {
         vm.createSelectFork(vm.envString("ARBITRUM_MAINNET_URL"), 316670752);
         hop = new FraxtalHop(approvedOfts);
         remoteHop = new RemoteHop(
-            address(1), // owner
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,
             0x31CAe3B7fB82d847621859fb1585353c5720660D,
@@ -78,7 +76,6 @@ contract FraxtalHopTest is BaseTest {
         vm.createSelectFork(vm.envString("ETHEREUM_MAINNET_URL"), 22124047);
         hop = new FraxtalHop(approvedOfts);
         remoteHop = new RemoteHop(
-            address(1), // owner
             OFTMsgCodec.addressToBytes32(address(hop)),
             2,
             0x173272739Bd7Aa6e4e214714048a9fE699453059,

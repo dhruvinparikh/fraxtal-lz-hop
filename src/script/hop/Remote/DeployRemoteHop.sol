@@ -50,7 +50,6 @@ abstract contract DeployRemoteHop is BaseScript {
         approvedOfts.push(fpiOft);
 
         RemoteHop remoteHop = new RemoteHop({
-            _owner: owner,
             _fraxtalHop: bytes32(uint256(uint160(FRAXTAL_HOP))),
             _numDVNs: 3,
             _EXECUTOR: EXECUTOR,
@@ -59,6 +58,10 @@ abstract contract DeployRemoteHop is BaseScript {
             _approvedOfts: approvedOfts
         });
         console.log("RemoteHop deployed at:", address(remoteHop));
+
+        // initiate ownership transfer and set config for Solana
+        remoteHop.transferOwnership(owner);
+        remoteHop.setExecutorOptions(30168, hex"0100210100000000000000000000000000030D40000000000000000000000000002DC6C0");
 
         RemoteMintRedeemHop remoteMintRedeemHop = new RemoteMintRedeemHop({
             _owner: owner,
