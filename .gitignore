@@ -15,7 +15,7 @@ docs/
 .env
 
 #misc
-node_modules
+# node_modules
 .DS_Store
 .vscode
 lcov.info
