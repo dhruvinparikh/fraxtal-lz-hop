@@ -17,9 +17,22 @@ Generate Safe transaction batches to retire the legacy (V1) Frax LayerZero Hop s
 
 Output: One Safe transaction batch JSON per chain in `generated/` directory.
 
+### ETH recovery only
+
+```bash
+RECOVER_ETH_ONLY=true forge script WinddownLegacyHop.s.sol --tc WinddownLegacyHop --ffi -vv
+```
+
+Emits a single-tx `recoverETH(recipient, liveBalance)` batch into `generated/recover-eth/`,
+**only** for hops whose native balance is currently non-zero — chains at zero produce no
+file. Use this to sweep residual gas after the main batches, or standalone. FraxtalHop (252)
+is excluded unless named in `CHAIN_IDS`: the hub spends its balance forwarding in-flight
+hops, so an exact-amount snapshot is only valid once the spokes are drained.
+
 ## Environment
 
 - `CHAIN_IDS=1,252` — Generate only for specific chain IDs (default: all)
+- `RECOVER_ETH_ONLY=true` — Only emit recoverETH, only for non-zero balances
 - `OUTPUT_DIR=...` — Output directory (default: `generated/`)
 - `RECOVER_ETH_RECIPIENT=0x...` — ETH recovery recipient (default: Travis EOA)
 - `RECOVER_ETH_RECIPIENT_<chainid>=...` — Per-chain override

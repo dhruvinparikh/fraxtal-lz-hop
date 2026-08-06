@@ -71,9 +71,11 @@ struct L0Config {
 // (2300-gas stipend, reverts on failure), not the unchecked call in RemoteHop.sol /
 // FraxtalHop.sol, so the owner Safe can never be the recipient. Recovery goes to the
 // RECOVER_ETH_RECIPIENT EOA (default: Travis, msig member on all chains). The amount is
-// an exact generation-time snapshot: RemoteHop balances only grow (hopFee accrual), so
-// the transfer always succeeds and any fees accrued after generation stay behind
-// (re-run once paused for a residual sweep batch). FraxtalHop SPENDS its balance
+// an exact generation-time snapshot and RemoteHop balances move in BOTH directions - they
+// accrue hopFee but also spend native paying LayerZero fees on forwards (observed: Base
+// 0.0723 ETH -> 0, Arbitrum 0.0742 -> 0.00076 between generations). So a stale snapshot
+// reverts the batch: REGENERATE any batch containing a recoverETH immediately before
+// queueing it, or run the RECOVER_ETH_ONLY pass. FraxtalHop SPENDS its balance
 // forwarding in-flight hops, so generate/queue its batch only after all spokes are
 // wound down and drained - a stale amount reverts the whole batch loudly at Safe
 // simulation, never silently.
@@ -84,6 +86,14 @@ struct L0Config {
 // REGENERATE and execute the Fraxtal batch last. Pausing / clearing the hub makes
 // lzCompose revert and V1's setMessageProcessed is broken (abi.encodePacked vs
 // abi.encode), so an in-flight compose caught by the hub batch can never be retired.
+//
+// RECOVER_ETH_ONLY=true builds the residual-sweep pass: the full wind-down batches above
+// snapshot each balance at generation time, so hopFee accrued between generation and
+// execution stays behind on the hop. This mode re-reads every hop's live balance and emits
+// a single-tx batch (recoverETH -> recipient EOA) for the chains that still hold a non-zero
+// balance; chains at zero produce no file at all. FraxtalHop (252) is excluded unless it is
+// named explicitly in CHAIN_IDS - the hub spends its balance forwarding in-flight hops, so
+// an exact-amount snapshot for it is only valid once the spokes are wound down and drained.
 //
 // RPC urls, chain ids, eids and the msig (`delegate`) come from L0Config.json, copied
 // from frax-oft-upgradeable/scripts/L0Config.json (chain 10 + 43114 RPCs replaced with
@@ -96,6 +106,8 @@ struct L0Config {
 //
 // Environment:
 //   CHAIN_IDS=1,252                    only generate for these chain ids (default: all)
+//   RECOVER_ETH_ONLY=true              emit ONLY recoverETH, and only for hops holding a
+//                                      non-zero native balance (see below)
 //   RPC_URL_<chainid>=...              override the L0Config RPC for one chain
 //   RECOVER_ETH_RECIPIENT=0x...        recoverETH recipient (default: Travis EOA)
 //   RECOVER_ETH_RECIPIENT_<chainid>=.. per-chain recipient override
@@ -118,7 +130,11 @@ contract WinddownLegacyHop is Script, HopConstants {
     }
 
     function run() external {
-        string memory outputDir = vm.envOr("OUTPUT_DIR", string("src/script/hop/winddown/generated"));
+        bool recoverEthOnly = vm.envOr("RECOVER_ETH_ONLY", false);
+        string memory defaultDir = recoverEthOnly
+            ? "src/script/hop/winddown/generated/recover-eth"
+            : "src/script/hop/winddown/generated";
+        string memory outputDir = vm.envOr("OUTPUT_DIR", defaultDir);
         vm.createDir(outputDir, true);
 
         // Safe JSON `createdAt` is stamped from block.timestamp (no fork => stale default)
@@ -126,7 +142,7 @@ contract WinddownLegacyHop is Script, HopConstants {
 
         // per-chain work lives in a worker contract so failures (bad RPC, dead chain, ...)
         // can be try/caught - foundry's script execution protection forbids self-calls
-        WinddownWorker worker = new WinddownWorker(outputDir, candidateEids);
+        WinddownWorker worker = new WinddownWorker(outputDir, candidateEids, recoverEthOnly);
 
         uint256[] memory onlyChains = vm.envOr("CHAIN_IDS", ",", new uint256[](0));
 
@@ -141,6 +157,13 @@ contract WinddownLegacyHop is Script, HopConstants {
         for (uint256 i = 0; i < targetConfigs.length; i++) {
             L0Config memory config = targetConfigs[i];
             if (onlyChains.length > 0 && !_contains(onlyChains, config.chainid)) continue;
+
+            // the hub's balance moves under it (in-flight forwards) - sweeping it is a
+            // deliberate, last step, never part of a blanket residual pass
+            if (recoverEthOnly && config.chainid == FRAXTAL_CHAINID && onlyChains.length == 0) {
+                console.log("Skipping FraxtalHop (252): pass CHAIN_IDS=252 to sweep the hub");
+                continue;
+            }
 
             try worker.windDownChain(config) returns (string memory filename) {
                 if (bytes(filename).length > 0) generatedFiles.push(filename);
@@ -238,6 +261,8 @@ contract WinddownWorker is Script, HopConstants {
     address internal constant TRAVIS = 0xcbc616D595D38483e6AdC45C7E426f44bF230928;
 
     string internal outputDir;
+    /// @dev emit only recoverETH, and only where the live balance is non-zero
+    bool internal recoverEthOnly;
     // Union of every EID that may key executorOptions (RemoteHop) or remoteHop (FraxtalHop)
     uint32[] internal candidateEids;
     // Union of every OFT the legacy hops may have approved, checked live per chain.
@@ -247,9 +272,10 @@ contract WinddownWorker is Script, HopConstants {
     // per-chain scratch
     SafeTx[] internal txs;
 
-    constructor(string memory _outputDir, uint32[] memory _candidateEids) {
+    constructor(string memory _outputDir, uint32[] memory _candidateEids, bool _recoverEthOnly) {
         outputDir = _outputDir;
         candidateEids = _candidateEids;
+        recoverEthOnly = _recoverEthOnly;
         _loadCandidateOfts();
     }
 
@@ -282,6 +308,20 @@ contract WinddownWorker is Script, HopConstants {
         // the batch is built for the delegate Safe; owner() alone comes from an untrusted
         // RPC, so a mismatch means stale config or a lying node - refuse either way
         require(hopOwner == config.delegate, "hop owner != L0Config delegate");
+
+        if (recoverEthOnly) {
+            _buildRecoverEth(rpc, hop, config.chainid, isFraxtal);
+            if (txs.length == 0) {
+                console.log("  zero native balance - no batch written");
+                return "";
+            }
+            _simulateTxs(rpc, config.delegate);
+            vm.chainId(config.chainid);
+            filename = string.concat(outputDir, "/", vm.toString(config.chainid), "-RecoverETH-", name, ".json");
+            new SafeTxHelper().writeTxs(txs, filename);
+            console.log("  1 tx -> %s", filename);
+            return filename;
+        }
 
         // 1. revoke previously approved OFTs
         for (uint256 i = 0; i < candidateOfts.length; i++) {
