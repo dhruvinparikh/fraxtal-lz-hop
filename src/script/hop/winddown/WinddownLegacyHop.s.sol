@@ -71,11 +71,15 @@ struct L0Config {
 // (2300-gas stipend, reverts on failure), not the unchecked call in RemoteHop.sol /
 // FraxtalHop.sol, so the owner Safe can never be the recipient. Recovery goes to the
 // RECOVER_ETH_RECIPIENT EOA (default: Travis, msig member on all chains). The amount is
-// an exact generation-time snapshot and RemoteHop balances move in BOTH directions - they
-// accrue hopFee but also spend native paying LayerZero fees on forwards (observed: Base
-// 0.0723 ETH -> 0, Arbitrum 0.0742 -> 0.00076 between generations). So a stale snapshot
-// reverts the batch: REGENERATE any batch containing a recoverETH immediately before
-// queueing it, or run the RECOVER_ETH_ONLY pass. FraxtalHop SPENDS its balance
+// an exact generation-time snapshot: RemoteHop balances only grow (hopFee accrual and LZ
+// refunds - Berachain accrued 5.38 BERA in the six days after its batch executed), so the
+// transfer always succeeds and a stale snapshot UNDER-sweeps rather than reverting; the
+// residue is picked up by the RECOVER_ETH_ONLY pass below.
+//
+// TWO PENDING exact-amount recoverETH txs against the same hop is the one way this breaks:
+// whichever executes first drops the balance below the other's hard-coded amount, and that
+// second transfer() reverts - taking its whole batch with it. So the residual pass refuses
+// any chain whose wind-down batch has not executed yet (see below). FraxtalHop SPENDS its balance
 // forwarding in-flight hops, so generate/queue its batch only after all spokes are
 // wound down and drained - a stale amount reverts the whole batch loudly at Safe
 // simulation, never silently.
@@ -310,6 +314,14 @@ contract WinddownWorker is Script, HopConstants {
         require(hopOwner == config.delegate, "hop owner != L0Config delegate");
 
         if (recoverEthOnly) {
+            // A hop that is still unpaused with fraxtalHop set has a wind-down batch sitting
+            // in its Safe queue, and that batch already carries its own exact-amount
+            // recoverETH. Queueing a second one guarantees whichever lands second reverts.
+            if (!isFraxtal && !_isWoundDown(rpc, hop)) {
+                console.log("  wind-down batch not executed yet - its own recoverETH covers this hop; skipping");
+                return "";
+            }
+
             _buildRecoverEth(rpc, hop, config.chainid, isFraxtal);
             if (txs.length == 0) {
                 console.log("  zero native balance - no batch written");
@@ -388,6 +400,13 @@ contract WinddownWorker is Script, HopConstants {
                 );
             }
         }
+    }
+
+    /// @dev a RemoteHop is wound down once its batch has run: paused and fraxtalHop cleared
+    function _isWoundDown(string memory rpc, address hop) internal returns (bool) {
+        bool paused = abi.decode(_ethCall(rpc, hop, abi.encodeCall(ILegacyHop.paused, ())), (bool));
+        bytes32 fraxtalHop = abi.decode(_ethCall(rpc, hop, abi.encodeCall(ILegacyHop.fraxtalHop, ())), (bytes32));
+        return paused && fraxtalHop == bytes32(0);
     }
 
     // 3. recover the native balance snapshot
