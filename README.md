@@ -120,6 +120,8 @@ IMintRedeemHop(mintRedeemHop).mintRedeem{value: fee.nativeFee}(oft, amount);
 | Hyperliquid | [`0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2`](https://hyperevmscan.io/address/0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2) | [`0xb85A8FDa7F5e52E32fa5582847CFfFee9456a5Dc`](https://hyperevmscan.io/address/0xb85a8fda7f5e52e32fa5582847cfffee9456a5dc) |
 | Stable | [`0x938Ca0dbaF2876011CD43598b14acA21a6c61b6e`](https://stablescan.xyz/address/0x938Ca0dbaF2876011CD43598b14acA21a6c61b6e) | [`0xA27eCe4f3108655dCE7d8aD684B780a2163928A1`](https://stablescan.xyz/address/0xA27eCe4f3108655dCE7d8aD684B780a2163928A1) |
 | Monad | [`0x40f66fff44dbbee88058185f2cfe287558d7e532`](https://monadscan.com/address/0x40f66fff44dbbee88058185f2cfe287558d7e532) | [`0x92e6892706053ee85fc1178affcb3803118d2c4f`](https://monadscan.com/address/0x92e6892706053ee85fc1178affcb3803118d2c4f) |
+| Somnia | n/a | [`0xE9e53734D2b67Ae263089d7a5dE1F5d97ab8cBDD`](https://explorer.somnia.network/address/0xE9e53734D2b67Ae263089d7a5dE1F5d97ab8cBDD) |
+| Robinhood | n/a | [`0xEfb78823eDCB57d78975a33576A7361dBD154d64`](https://robinhoodchain.blockscout.com/address/0xEfb78823eDCB57d78975a33576A7361dBD154d64) |
 
 ### Testnet
 | Chain | `RemoteHop` |

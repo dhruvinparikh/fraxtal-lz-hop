@@ -1,8 +1,7 @@
+// SPDX-License-Identifier: MIT
 pragma solidity 0.8.23;
 
-import { BaseScript } from "frax-std/BaseScript.sol";
-import { console } from "frax-std/BaseScript.sol";
-import { RemoteHop } from "src/contracts/hop/RemoteHop.sol";
+import { Script, console } from "forge-std/Script.sol";
 import { RemoteMintRedeemHop } from "src/contracts/hop/RemoteMintRedeemHop.sol";
 
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -21,8 +20,9 @@ interface IDVN {
     function vid() external view returns (uint32);
 }
 
-abstract contract DeployRemoteHop is BaseScript {
-    address constant FRAXTAL_HOP = 0x2A2019b30C157dB6c1C01306b8025167dBe1803B;
+/// @dev Signing is left to the CLI (`--gcp --sender <eoa>`, `--private-key`, `--account`, ...) so that
+///      the deployer EOA never has to exist as a raw key in the environment.
+abstract contract DeployRemoteHop is Script {
     address constant FRAXTAL_MINTREDEEM_HOP = 0x3e6a2cBaFD864e09e6DAb9Cf035a0AbEa32bc0BC;
 
     address owner;
@@ -31,46 +31,26 @@ abstract contract DeployRemoteHop is BaseScript {
     address DVN;
     address SEND_LIBRARY;
 
+    /// @dev Must match the number of *required* DVNs configured on Fraxtal for the return leg
+    ///      (Fraxtal -> this chain), since `quoteHop()` prices that leg for the user up front.
+    uint256 numDVNs = 5;
+
     address frxUsdOft;
     address sfrxUsdOft;
     address frxEthOft;
     address sfrxEthOft;
     address wFraxOft;
     address fpiOft;
-    address[] approvedOfts;
 
-    function run() public broadcaster {
+    function run() public virtual {
         _validateAddrs();
 
-        approvedOfts.push(frxUsdOft);
-        approvedOfts.push(sfrxUsdOft);
-        approvedOfts.push(frxEthOft);
-        approvedOfts.push(sfrxEthOft);
-        approvedOfts.push(wFraxOft);
-        approvedOfts.push(fpiOft);
-
-        uint32[] memory _eids = new uint32[](1);
-        _eids[0] = 30168;
-        bytes[] memory _executorOptions = new bytes[](1);
-        _executorOptions[0] = hex"0100210100000000000000000000000000030D40000000000000000000000000002DC6C0";
-
-        RemoteHop remoteHop = new RemoteHop({
-            _owner: owner,
-            _fraxtalHop: bytes32(uint256(uint160(FRAXTAL_HOP))),
-            _numDVNs: 3,
-            _EXECUTOR: EXECUTOR,
-            _DVN: DVN,
-            _TREASURY: ISendLibrary(SEND_LIBRARY).treasury(),
-            _approvedOfts: approvedOfts,
-            _eids: _eids,
-            _executorOptions: _executorOptions
-        });
-        console.log("RemoteHop deployed at:", address(remoteHop));
+        vm.startBroadcast();
 
         RemoteMintRedeemHop remoteMintRedeemHop = new RemoteMintRedeemHop({
             _owner: owner,
             _fraxtalHop: bytes32(uint256(uint160(FRAXTAL_MINTREDEEM_HOP))),
-            _numDVNs: 3,
+            _numDVNs: numDVNs,
             _EXECUTOR: EXECUTOR,
             _DVN: DVN,
             _TREASURY: ISendLibrary(SEND_LIBRARY).treasury(),
@@ -79,9 +59,14 @@ abstract contract DeployRemoteHop is BaseScript {
             _sfrxUsdOft: sfrxUsdOft
         });
         console.log("RemoteMintRedeemHop deployed at:", address(remoteMintRedeemHop));
+
+        vm.stopBroadcast();
     }
 
     function _validateAddrs() internal view returns (bool) {
+        require(owner != address(0), "owner unset");
+        require(numDVNs > 0, "numDVNs unset");
+
         (uint64 major, uint8 minor, uint8 endpointVersion) = ISendLibrary(SEND_LIBRARY).version();
         require(major == 3 && minor == 0 && endpointVersion == 2, "Invalid SendLibrary version");
 
@@ -94,7 +79,6 @@ abstract contract DeployRemoteHop is BaseScript {
         require(isStringEqual(IERC20Metadata(frxEthOft).symbol(), "frxETH"), "frxEthOft != frxETH");
         require(isStringEqual(IERC20Metadata(sfrxEthOft).symbol(), "sfrxETH"), "sfrxEthOft != sfrxETH");
         require(isStringEqual(IERC20Metadata(wFraxOft).symbol(), "WFRAX"), "wFraxOft != WFRAX");
-        require(isStringEqual(IERC20Metadata(fpiOft).symbol(), "FPI"), "fpiOft != FPI");
     }
 
     function isStringEqual(string memory _a, string memory _b) public pure returns (bool) {
