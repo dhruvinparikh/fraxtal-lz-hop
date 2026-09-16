@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
-import { ITIP20 } from "tempo-std/interfaces/ITIP20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { StdTokens } from "tempo-std/StdTokens.sol";
 import { ILZEndpointDollar } from "src/contracts/interfaces/vendor/layerzero/ILZEndpointDollar.sol";
@@ -182,7 +183,7 @@ abstract contract TempoGasTokenBase {
         // If the user's token is already whitelisted, collect it directly.
         if (nativeToken.isWhitelistedToken(userToken)) {
             if (_nativeFee > _maxUserTokenAmount) revert FeeAboveCap(_nativeFee, _maxUserTokenAmount);
-            ITIP20(userToken).transferFrom(msg.sender, address(this), _nativeFee);
+            SafeERC20.safeTransferFrom(IERC20(userToken), msg.sender, address(this), _nativeFee);
             return userToken;
         }
 
@@ -193,8 +194,8 @@ abstract contract TempoGasTokenBase {
         uint128 maxAmountIn = _withSlippage(quotedAmountIn);
         if (maxAmountIn > _maxUserTokenAmount) revert FeeAboveCap(maxAmountIn, _maxUserTokenAmount);
 
-        ITIP20(userToken).transferFrom(msg.sender, address(this), maxAmountIn);
-        ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), maxAmountIn);
+        SafeERC20.safeTransferFrom(IERC20(userToken), msg.sender, address(this), maxAmountIn);
+        SafeERC20.forceApprove(IERC20(userToken), address(StdPrecompiles.STABLECOIN_DEX), maxAmountIn);
         uint128 spentAmountIn = StdPrecompiles.STABLECOIN_DEX.swapExactAmountOut({
             tokenIn: userToken,
             tokenOut: targetToken,
@@ -203,9 +204,9 @@ abstract contract TempoGasTokenBase {
         });
 
         // The DEX pulls tokenIn without consuming the allowance, so clear it rather than leave it dangling.
-        ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), 0);
+        SafeERC20.forceApprove(IERC20(userToken), address(StdPrecompiles.STABLECOIN_DEX), 0);
         if (maxAmountIn > spentAmountIn) {
-            ITIP20(userToken).transfer(msg.sender, maxAmountIn - spentAmountIn);
+            SafeERC20.safeTransfer(IERC20(userToken), msg.sender, maxAmountIn - spentAmountIn);
         }
 
         return targetToken;

@@ -2,7 +2,8 @@
 pragma solidity ^0.8.0;
 
 import { SendParam, MessagingFee, IOFT } from "@fraxfinance/layerzero-v2-upgradeable/oapp/contracts/oft/interfaces/IOFT.sol";
-import { ITIP20 } from "tempo-std/interfaces/ITIP20.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { RemoteMintRedeemHop } from "./RemoteMintRedeemHop.sol";
 import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
@@ -99,7 +100,7 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         _amountLD = removeDust(_oft, _amountLD);
         if (_amountLD == 0) revert ZeroAmountSend();
         if (_feeToken == address(0)) _feeToken = _resolveUserToken();
-        ITIP20(IOFT(_oft).token()).transferFrom(msg.sender, address(this), _amountLD);
+        SafeERC20.safeTransferFrom(IERC20(IOFT(_oft).token()), msg.sender, address(this), _amountLD);
         _mintRedeemViaFraxtal(_oft, bytes32(uint256(uint160(msg.sender))), _amountLD, _feeToken, _maxFeeTokenAmount);
 
         emit MintRedeem(_oft, msg.sender, _amountLD);
@@ -178,10 +179,10 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
             if (_paymentToken == oftToken) {
                 oftTokenAllowance += _nativeFee;
             } else {
-                ITIP20(_paymentToken).approve(_oft, _nativeFee);
+                SafeERC20.forceApprove(IERC20(_paymentToken), _oft, _nativeFee);
             }
         }
 
-        if (oftTokenAllowance > 0) ITIP20(oftToken).approve(_oft, oftTokenAllowance);
+        if (oftTokenAllowance > 0) SafeERC20.forceApprove(IERC20(oftToken), _oft, oftTokenAllowance);
     }
 }
