@@ -128,6 +128,13 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
         assertEq(hop.feeSwapSlippageBps(), 50, "0 restores the default");
     }
 
+    /// @dev The capped overload needs an explicit fee token; zero is rejected before any precompile is touched.
+    function testFork_MintRedeemRejectsZeroFeeToken() public {
+        vm.prank(user);
+        vm.expectRevert(RemoteMintRedeemHopTempo.InvalidFeeToken.selector);
+        hop.mintRedeem(FRXUSD_OFT, 1e6, address(0), type(uint256).max);
+    }
+
     function testFork_MintRedeemRejectsUnapprovedOft() public {
         vm.prank(user);
         vm.expectRevert(RemoteMintRedeemHop.InvalidOFT.selector);

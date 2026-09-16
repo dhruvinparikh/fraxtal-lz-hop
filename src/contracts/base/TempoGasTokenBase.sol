@@ -21,6 +21,7 @@ abstract contract TempoGasTokenBase {
     error OFTAltCore__msg_value_not_zero(uint256 _msg_value);
     error NoSwappableWhitelistedToken(address userToken);
     error FeeSwapSlippageTooHigh(uint16 bps);
+    error FeeAboveCap(uint256 required, uint256 cap);
 
     /// @notice Emitted when the fee-swap slippage allowance changes.
     event FeeSwapSlippageBpsSet(uint16 bps);
@@ -67,15 +68,19 @@ abstract contract TempoGasTokenBase {
 
     // ─── Token Resolution ────────────────────────────────────────────────
 
-    /// @dev Resolves the caller's TIP20 fee token using Tempo's cascading selection:
-    ///      1. `TIP_FEE_MANAGER.userTokens(msg.sender)` — user's explicit choice
-    ///      2. Falls back to `PATH_USD` if no token is set (address(0))
-    ///      Mirrors the FeeManager spec's `collectFeePreTx` / `collectFeePostTx` fallback.
-    function _resolveUserToken() internal view returns (address userToken) {
-        userToken = StdPrecompiles.TIP_FEE_MANAGER.userTokens(msg.sender);
+    /// @notice The TIP20 a call from `_caller` is debited for fees when no fee token is named:
+    ///         their FeeManager fee token, or pathUSD if they never set one. Quote with this token.
+    /// @dev Mirrors the FeeManager spec's `collectFeePreTx` / `collectFeePostTx` fallback.
+    function feeTokenOf(address _caller) public view returns (address userToken) {
+        userToken = StdPrecompiles.TIP_FEE_MANAGER.userTokens(_caller);
         if (userToken == address(0)) {
             userToken = StdTokens.PATH_USD_ADDRESS;
         }
+    }
+
+    /// @dev `feeTokenOf(msg.sender)`.
+    function _resolveUserToken() internal view returns (address userToken) {
+        return feeTokenOf(msg.sender);
     }
 
     // ─── Fee-Token Binding ───────────────────────────────────────────────
@@ -156,16 +161,27 @@ abstract contract TempoGasTokenBase {
 
     // ─── Fee Collection ──────────────────────────────────────────────────
 
-    /// @dev Collects `_nativeFee` worth of gas payment into this contract as a single whitelisted token.
-    ///      This is useful for callers that need to split one collected payment across multiple consumers.
+    /// @dev Collects `_nativeFee` worth of gas payment into this contract as a single whitelisted token,
+    ///      debiting the caller's FeeManager fee token with no cap.
     function _collectNativeAltToken(uint256 _nativeFee) internal returns (address paymentToken) {
-        if (_nativeFee == 0) return _resolveUserToken();
-        if (address(nativeToken) == address(0)) revert NativeTokenUnavailable();
+        return _collectNativeAltToken(_nativeFee, _resolveUserToken(), type(uint256).max);
+    }
 
-        address userToken = _resolveUserToken();
+    /// @dev Collects `_nativeFee` worth of gas payment into this contract as a single whitelisted token,
+    ///      debiting `userToken`. Reverts `FeeAboveCap` before pulling anything if the debit -- the
+    ///      figure `quoteUserTokenFee` reports for the same inputs -- would exceed `_maxUserTokenAmount`.
+    ///      This is useful for callers that need to split one collected payment across multiple consumers.
+    function _collectNativeAltToken(
+        uint256 _nativeFee,
+        address userToken,
+        uint256 _maxUserTokenAmount
+    ) internal returns (address paymentToken) {
+        if (_nativeFee == 0) return userToken;
+        if (address(nativeToken) == address(0)) revert NativeTokenUnavailable();
 
         // If the user's token is already whitelisted, collect it directly.
         if (nativeToken.isWhitelistedToken(userToken)) {
+            if (_nativeFee > _maxUserTokenAmount) revert FeeAboveCap(_nativeFee, _maxUserTokenAmount);
             ITIP20(userToken).transferFrom(msg.sender, address(this), _nativeFee);
             return userToken;
         }
@@ -175,6 +191,7 @@ abstract contract TempoGasTokenBase {
         // debits only what it consumes and the remainder is refunded below.
         (address targetToken, uint128 quotedAmountIn) = _findSwapTarget(userToken, SafeCast.toUint128(_nativeFee));
         uint128 maxAmountIn = _withSlippage(quotedAmountIn);
+        if (maxAmountIn > _maxUserTokenAmount) revert FeeAboveCap(maxAmountIn, _maxUserTokenAmount);
 
         ITIP20(userToken).transferFrom(msg.sender, address(this), maxAmountIn);
         ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), maxAmountIn);

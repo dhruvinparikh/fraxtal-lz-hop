@@ -37,6 +37,8 @@ import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
 ///
 /// @author Frax Finance: https://github.com/FraxFinance
 contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
+    error InvalidFeeToken();
+
     constructor(
         address _owner,
         bytes32 _fraxtalHop,
@@ -65,30 +67,65 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
 
     /// @inheritdoc RemoteMintRedeemHop
     /// @dev Rejects native value -- on Tempo the fee is debited as a TIP20 inside
-    ///      `_mintRedeemViaFraxtal`, so a caller sending gas here would simply strand it.
+    ///      `_mintRedeemViaFraxtal`, so a caller sending gas here would simply strand it. The fee is
+    ///      pulled in `feeTokenOf(msg.sender)` with no cap; see the four-argument overload for both.
     function mintRedeem(address _oft, uint256 _amountLD) external payable virtual override {
         if (msg.value > 0) revert OFTAltCore__msg_value_not_zero(msg.value);
+        _mintRedeem(_oft, _amountLD, address(0), type(uint256).max);
+    }
+
+    /// @notice As `mintRedeem(oft, amount)`, but the caller names the TIP20 the fee is pulled in and
+    ///         caps that debit -- the Tempo equivalent of the `msg.value` ceiling on native chains.
+    /// @param _feeToken TIP20 to pay the fee in. Pulled 1:1 when LZ-whitelisted, otherwise swapped on
+    ///        the DEX; `feeTokenOf(caller)` reproduces the two-argument behaviour.
+    /// @param _maxFeeTokenAmount Reverts `FeeAboveCap` -- before anything is pulled -- if the fee in
+    ///        `_feeToken`, as `quoteUserTokenFee(oft, caller, amount, feeToken)` reports it at execution,
+    ///        exceeds this.
+    function mintRedeem(
+        address _oft,
+        uint256 _amountLD,
+        address _feeToken,
+        uint256 _maxFeeTokenAmount
+    ) external virtual {
+        if (_feeToken == address(0)) revert InvalidFeeToken();
+        _mintRedeem(_oft, _amountLD, _feeToken, _maxFeeTokenAmount);
+    }
+
+    /// @dev `_feeToken == address(0)` means `feeTokenOf(msg.sender)`, resolved only once the cheap guards pass.
+    function _mintRedeem(address _oft, uint256 _amountLD, address _feeToken, uint256 _maxFeeTokenAmount) internal {
         if (paused) revert HopPaused();
         if (_oft != frxUsdOft && _oft != sfrxUsdOft) revert InvalidOFT();
 
         _amountLD = removeDust(_oft, _amountLD);
         if (_amountLD == 0) revert ZeroAmountSend();
+        if (_feeToken == address(0)) _feeToken = _resolveUserToken();
         ITIP20(IOFT(_oft).token()).transferFrom(msg.sender, address(this), _amountLD);
-        _mintRedeemViaFraxtal(_oft, bytes32(uint256(uint160(msg.sender))), _amountLD);
+        _mintRedeemViaFraxtal(_oft, bytes32(uint256(uint160(msg.sender))), _amountLD, _feeToken, _maxFeeTokenAmount);
 
         emit MintRedeem(_oft, msg.sender, _amountLD);
+    }
+
+    /// @dev Parent hook; fee in `feeTokenOf(msg.sender)`, uncapped.
+    function _mintRedeemViaFraxtal(address _oft, bytes32 _to, uint256 _amountLD) internal virtual override {
+        _mintRedeemViaFraxtal(_oft, _to, _amountLD, _resolveUserToken(), type(uint256).max);
     }
 
     /// @dev Replaces the native-fee path: collects the full fee as one whitelisted TIP20, binds this
     ///      contract's fee token so the OFT's `_payNative` consumes that same token without a second
     ///      swap, then sends with zero value.
-    function _mintRedeemViaFraxtal(address _oft, bytes32 _to, uint256 _amountLD) internal virtual override {
+    function _mintRedeemViaFraxtal(
+        address _oft,
+        bytes32 _to,
+        uint256 _amountLD,
+        address _feeToken,
+        uint256 _maxFeeTokenAmount
+    ) internal virtual {
         SendParam memory sendParam = _generateSendParam({ _to: _to, _amountLD: _amountLD, _minAmountLD: _amountLD });
-        MessagingFee memory fee = _quoteSendRebindingOnFailure(_oft, sendParam);
+        MessagingFee memory fee = _quoteSendRebindingOnFailure(_oft, sendParam, _feeToken);
 
         // Collect the outbound fee and the retained return-leg estimate in one debit, so the caller
         // makes a single approval and there is no native refund to hand back.
-        address paymentToken = _collectNativeAltToken(fee.nativeFee + quoteHop());
+        address paymentToken = _collectNativeAltToken(fee.nativeFee + quoteHop(), _feeToken, _maxFeeTokenAmount);
         _bindFeeToken(paymentToken);
         _approveOftFee(_oft, paymentToken, _amountLD, fee.nativeFee);
 
@@ -98,16 +135,17 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     /// @dev The OFT's quote validates THIS contract's FeeManager binding, which is whatever the previous
     ///      call paid with. Normally that token is still LZ-whitelisted and the quote just works. If
     ///      LayerZero has since delisted it and the DEX has no route out of it, the quote reverts -- so
-    ///      re-bind to the current caller's token (as FraxOFTWalletUpgradeableTempo does up front) and
+    ///      re-bind to the token this call pays with (as FraxOFTWalletUpgradeableTempo does up front) and
     ///      quote again. Free on the happy path; an inherited binding can never wedge the hop.
     function _quoteSendRebindingOnFailure(
         address _oft,
-        SendParam memory _sendParam
+        SendParam memory _sendParam,
+        address _feeToken
     ) internal returns (MessagingFee memory fee) {
         try IOFT(_oft).quoteSend(_sendParam, false) returns (MessagingFee memory _fee) {
             return _fee;
         } catch {
-            _bindFeeToken(_resolveUserToken());
+            _bindFeeToken(_feeToken);
             return IOFT(_oft).quoteSend(_sendParam, false);
         }
     }
@@ -115,11 +153,11 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     /// @notice Fee a caller must hold and approve in `_userToken` to bridge `_amountLD` (on top of
     ///         `_amountLD` itself when `_userToken` is the bridged token).
     /// @dev `quote()` reports the fee in endpoint-native (LZD) units; UIs need the figure in whichever
-    ///      TIP20 the user actually pays with, which is what this converts to. Pass the token
-    ///      explicitly so the quote is correct before `setUserToken` has ever been called for them.
-    ///      For a token that must be swapped the figure includes the fee-swap slippage allowance; the
-    ///      part the swap does not consume is refunded in the same call, so the net debit is at most
-    ///      this amount.
+    ///      TIP20 the user actually pays with, which is what this converts to. Pass the token the call
+    ///      will use: the `_feeToken` argument of the four-argument `mintRedeem`, or `feeTokenOf(caller)`
+    ///      for the two-argument one. For a token that must be swapped the figure includes the fee-swap
+    ///      slippage allowance; the part the swap does not consume is refunded in the same call, so the
+    ///      net debit is at most this amount -- and it is the figure `_maxFeeTokenAmount` is checked against.
     function quoteUserTokenFee(
         address _oft,
         bytes32 _to,

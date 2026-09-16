@@ -370,6 +370,101 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.clearMockedCalls();
     }
 
+    // ───────────────────────── capped, token-explicit overload ─────────────────────────
+
+    /// @dev The four-argument mintRedeem restores the fee ceiling that msg.value gives the native hop (L-2 in
+    ///      the 2026-09-16 review): a cap below the live fee reverts before anything is pulled, a cap at the
+    ///      live fee goes through, and the debit never exceeds it.
+    function testFork_E2E_FeeCap_WhitelistedToken() public {
+        uint256 amount = 10e6;
+        uint256 fee = hop.quoteUserTokenFee(FRXUSD_OFT, to, amount, PATH_USD);
+        uint256 uFrx0 = _bal(frxUsd, user);
+        uint256 uPath0 = _bal(PATH_USD, user);
+
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount);
+        ITIP20(PATH_USD).approve(address(hop), fee);
+
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.FeeAboveCap.selector, fee, fee - 1));
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, fee - 1);
+        assertEq(_bal(frxUsd, user), uFrx0, "revert is atomic: principal not pulled");
+        assertEq(_bal(PATH_USD, user), uPath0, "revert is atomic: fee not pulled");
+
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, fee);
+        vm.stopPrank();
+
+        assertEq(uFrx0 - _bal(frxUsd, user), amount, "principal debited");
+        assertEq(uPath0 - _bal(PATH_USD, user), fee, "fee debited exactly at the cap");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop bound to pathUSD");
+    }
+
+    /// @dev Same cap semantics on the DEX path: the cap is checked against the padded figure quoteUserTokenFee
+    ///      reports, before the pull. The explicit token also overrides the caller's FeeManager binding.
+    function testFork_E2E_FeeCap_DexRoutedToken() public {
+        assertEq(hop.feeTokenOf(user), PATH_USD, "user is bound to pathUSD (default)");
+
+        uint256 amount = 10e6;
+        uint256 needOut = hop.quote(FRXUSD_OFT, to, amount).nativeFee;
+        (address target, uint128 rawQuote) = _rawSwapQuote(frxUsd, uint128(needOut));
+        uint256 feeInFrx = hop.quoteUserTokenFee(FRXUSD_OFT, to, amount, frxUsd);
+        uint256 uFrx0 = _bal(frxUsd, user);
+        uint256 uPath0 = _bal(PATH_USD, user);
+        uint256 hopTarget0 = _bal(target, address(hop));
+
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount + feeInFrx);
+
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.FeeAboveCap.selector, feeInFrx, feeInFrx - 1));
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, feeInFrx - 1);
+        assertEq(_bal(frxUsd, user), uFrx0, "revert is atomic: nothing pulled");
+
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, feeInFrx);
+        vm.stopPrank();
+
+        uint256 spent = uFrx0 - _bal(frxUsd, user) - amount;
+        assertGe(spent, rawQuote, "settled for at least the raw quote");
+        assertLe(spent, feeInFrx, "net fee debit within the cap");
+        assertEq(_bal(PATH_USD, user), uPath0, "binding (pathUSD) ignored in favour of the explicit token");
+        assertEq(_bal(frxUsd, address(hop)), 0, "unspent headroom refunded");
+        assertEq(_bal(target, address(hop)) - hopTarget0, hop.quoteHop(), "hop retains quoteHop() in the swap target");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), target, "hop bound to the swap target");
+    }
+
+    /// @dev L-4 mitigation: a caller whose FeeManager token is frxUSD (DEX-routed, thin book) can name a
+    ///      whitelisted token and skip the DEX entirely.
+    function testFork_E2E_ExplicitWhitelistedTokenBypassesDex() public {
+        vm.prank(user, user);
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(frxUsd);
+        assertEq(hop.feeTokenOf(user), frxUsd, "user is bound to frxUSD");
+
+        uint256 amount = 10e6;
+        uint256 fee = hop.quoteUserTokenFee(FRXUSD_OFT, to, amount, PATH_USD);
+        uint256 uFrx0 = _bal(frxUsd, user);
+        uint256 uPath0 = _bal(PATH_USD, user);
+        uint256 hopPath0 = _bal(PATH_USD, address(hop));
+
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount);
+        ITIP20(PATH_USD).approve(address(hop), fee);
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, fee);
+        vm.stopPrank();
+
+        assertEq(uFrx0 - _bal(frxUsd, user), amount, "frxUSD debited for the principal only");
+        assertEq(uPath0 - _bal(PATH_USD, user), fee, "fee paid 1:1 in pathUSD");
+        assertEq(_bal(PATH_USD, address(hop)) - hopPath0, hop.quoteHop(), "hop retains quoteHop() in pathUSD");
+        assertEq(IERC20Like(frxUsd).allowance(address(hop), DEX), 0, "DEX never involved");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop bound to pathUSD");
+    }
+
+    /// @dev feeTokenOf tells integrators which token the two-argument mintRedeem will pull, so they can quote it.
+    function testFork_E2E_FeeTokenOfView() public {
+        assertEq(hop.feeTokenOf(user), PATH_USD, "unset -> pathUSD");
+        assertEq(hop.feeTokenOf(address(new IntegratorCaller())), PATH_USD, "fresh contract -> pathUSD");
+        vm.prank(user, user);
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+        assertEq(hop.feeTokenOf(user), USDC_E, "set -> that token");
+    }
+
     /// @dev Contract callers that never set a fee token are charged in pathUSD.
     function testFork_E2E_ContractCallerDefaultsToPathUsd() public {
         IntegratorCaller caller = new IntegratorCaller();
