@@ -57,6 +57,12 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         return "1.0.1-tempo";
     }
 
+    /// @notice Set the slippage allowance applied to a DEX-routed fee swap, in basis points.
+    /// @param _bps Allowance in bps, capped by MAX_FEE_SWAP_SLIPPAGE_BPS. 0 restores the default.
+    function setFeeSwapSlippageBps(uint16 _bps) external onlyOwner {
+        _setFeeSwapSlippageBps(_bps);
+    }
+
     /// @inheritdoc RemoteMintRedeemHop
     /// @dev Rejects native value -- on Tempo the fee is debited as a TIP20 inside
     ///      `_mintRedeemViaFraxtal`, so a caller sending gas here would simply strand it.
@@ -86,13 +92,17 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         StdPrecompiles.TIP_FEE_MANAGER.setUserToken(paymentToken);
         _approveOftFee(_oft, paymentToken, _amountLD, fee.nativeFee);
 
-        IOFT(_oft).send{ value: 0 }(sendParam, fee, address(this));
+        IOFT(_oft).send(sendParam, fee, address(this));
     }
 
-    /// @notice Amount of `_userToken` a caller must hold and approve to bridge `_amountLD`.
+    /// @notice Fee a caller must hold and approve in `_userToken` to bridge `_amountLD` (on top of
+    ///         `_amountLD` itself when `_userToken` is the bridged token).
     /// @dev `quote()` reports the fee in endpoint-native (LZD) units; UIs need the figure in whichever
     ///      TIP20 the user actually pays with, which is what this converts to. Pass the token
     ///      explicitly so the quote is correct before `setUserToken` has ever been called for them.
+    ///      For a token that must be swapped the figure includes the fee-swap slippage allowance; the
+    ///      part the swap does not consume is refunded in the same call, so the net debit is at most
+    ///      this amount.
     function quoteUserTokenFee(
         address _oft,
         bytes32 _to,

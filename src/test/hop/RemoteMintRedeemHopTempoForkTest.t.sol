@@ -8,6 +8,7 @@ import { RemoteMintRedeemHopTempo } from "src/contracts/hop/RemoteMintRedeemHopT
 import { RemoteMintRedeemHop } from "src/contracts/hop/RemoteMintRedeemHop.sol";
 import { IOFT2 } from "src/contracts/hop/interfaces/IOFT2.sol";
 import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 interface IEndpointV2AltLike {
     function nativeToken() external view returns (address);
@@ -100,6 +101,31 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.OFTAltCore__msg_value_not_zero.selector, 1 wei));
         hop.mintRedeem{ value: 1 wei }(WFRAX_OFT, 1e18);
+    }
+
+    /// @dev DEX-routed fee swaps carry a slippage allowance (the DEX quotes per tick but settles per order,
+    ///      so a fill can need more input than quoted). Default 50 bps, owner-tunable up to 200, 0 restores
+    ///      the default. The swap itself is covered by the E2E suite under `--network tempo`.
+    function testFork_FeeSwapSlippageBpsDefaultAndBounds() public {
+        assertEq(hop.feeSwapSlippageBps(), 50, "default headroom");
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
+        hop.setFeeSwapSlippageBps(100);
+
+        vm.prank(TEMPO_MSIG);
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.FeeSwapSlippageTooHigh.selector, uint16(201)));
+        hop.setFeeSwapSlippageBps(201);
+
+        vm.prank(TEMPO_MSIG);
+        vm.expectEmit(true, true, true, true, address(hop));
+        emit TempoGasTokenBase.FeeSwapSlippageBpsSet(200);
+        hop.setFeeSwapSlippageBps(200);
+        assertEq(hop.feeSwapSlippageBps(), 200, "max accepted");
+
+        vm.prank(TEMPO_MSIG);
+        hop.setFeeSwapSlippageBps(0);
+        assertEq(hop.feeSwapSlippageBps(), 50, "0 restores the default");
     }
 
     function testFork_MintRedeemRejectsUnapprovedOft() public {

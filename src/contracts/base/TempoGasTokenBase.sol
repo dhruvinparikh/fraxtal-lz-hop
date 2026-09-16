@@ -20,11 +20,49 @@ abstract contract TempoGasTokenBase {
     error NativeTokenUnavailable();
     error OFTAltCore__msg_value_not_zero(uint256 _msg_value);
     error NoSwappableWhitelistedToken(address userToken);
+    error FeeSwapSlippageTooHigh(uint16 bps);
+
+    /// @notice Emitted when the fee-swap slippage allowance changes.
+    event FeeSwapSlippageBpsSet(uint16 bps);
+
+    /// @dev Applied to the quoted input of a fee swap. The DEX quotes per tick but settles per order,
+    ///      and each order rounds its input up, so a fill that crosses an order boundary can need more
+    ///      input than was quoted; with no headroom the swap reverts `MaxInputExceeded`. Whatever the
+    ///      swap does not consume is refunded to the payer in the same call. Mirrors
+    ///      frax-oft-upgradeable v1.2.0 (`TempoAltTokenLib`).
+    uint16 internal constant DEFAULT_FEE_SWAP_SLIPPAGE_BPS = 50;
+    uint16 internal constant MAX_FEE_SWAP_SLIPPAGE_BPS = 200;
 
     ILZEndpointDollar public immutable nativeToken;
 
+    /// @dev 0 means "use the default"; read through `feeSwapSlippageBps()`.
+    uint16 private _feeSwapSlippageBps;
+
     constructor(address _lzEndpoint) {
         nativeToken = ILZEndpointDollar(IEndpointV2Alt(_lzEndpoint).nativeToken());
+    }
+
+    // ─── Fee-Swap Slippage ───────────────────────────────────────────────
+
+    /// @notice Slippage allowance applied to a quoted fee swap, in basis points.
+    function feeSwapSlippageBps() public view returns (uint16) {
+        uint16 configured = _feeSwapSlippageBps;
+        return configured == 0 ? DEFAULT_FEE_SWAP_SLIPPAGE_BPS : configured;
+    }
+
+    /// @dev Pass 0 to fall back to DEFAULT_FEE_SWAP_SLIPPAGE_BPS.
+    function _setFeeSwapSlippageBps(uint16 _bps) internal {
+        if (_bps > MAX_FEE_SWAP_SLIPPAGE_BPS) revert FeeSwapSlippageTooHigh(_bps);
+        _feeSwapSlippageBps = _bps;
+        emit FeeSwapSlippageBpsSet(_bps);
+    }
+
+    /// @dev Always adds at least one unit: the quote/settlement divergence is a rounding artefact,
+    ///      so a percentage allowance alone rounds away on small amounts.
+    function _withSlippage(uint128 _amountIn) internal view returns (uint128) {
+        uint256 padded = (uint256(_amountIn) * (10_000 + uint256(feeSwapSlippageBps()))) / 10_000;
+        if (padded <= uint256(_amountIn)) padded = uint256(_amountIn) + 1;
+        return padded > type(uint128).max ? type(uint128).max : uint128(padded);
     }
 
     // ─── Token Resolution ────────────────────────────────────────────────
@@ -88,7 +126,9 @@ abstract contract TempoGasTokenBase {
     ///      explicitly so the quote works even before `setUserToken` is called on-chain.
     /// @param _userToken The TIP20 gas token to quote for.
     /// @param _endpointFee The fee in endpoint-native (LZEndpointDollar) units, as returned by quoteSend().
-    /// @return The estimated amount of `_userToken` required.
+    /// @return The estimated amount of `_userToken` required, including the slippage allowance
+    ///         applied when the fee must be swapped. Approve at least this much; the unspent part
+    ///         of the allowance is refunded in the same call.
     function quoteUserTokenFee(address _userToken, uint256 _endpointFee) external view returns (uint256) {
         return _quoteUserTokenFee(_userToken, _endpointFee);
     }
@@ -98,10 +138,10 @@ abstract contract TempoGasTokenBase {
         if (_endpointFee == 0) return 0;
         if (_userToken == address(0)) _userToken = StdTokens.PATH_USD_ADDRESS;
         if (nativeToken.isWhitelistedToken(_userToken)) {
-            return _endpointFee;
+            return _endpointFee; // collected 1:1, no swap and therefore no slippage
         }
         (, uint128 _amountIn) = _findSwapTarget(_userToken, SafeCast.toUint128(_endpointFee));
-        return _amountIn;
+        return _withSlippage(_amountIn);
     }
 
     // ─── Fee Collection ──────────────────────────────────────────────────
@@ -120,17 +160,26 @@ abstract contract TempoGasTokenBase {
             return userToken;
         }
 
-        // Find the cheapest whitelisted token to swap to
-        (address targetToken, uint128 userTokenAmount) = _findSwapTarget(userToken, SafeCast.toUint128(_nativeFee));
+        // Find the cheapest whitelisted token to swap to. The cap carries a slippage allowance
+        // because settlement may require marginally more input than the quote returned; the DEX
+        // debits only what it consumes and the remainder is refunded below.
+        (address targetToken, uint128 quotedAmountIn) = _findSwapTarget(userToken, SafeCast.toUint128(_nativeFee));
+        uint128 maxAmountIn = _withSlippage(quotedAmountIn);
 
-        ITIP20(userToken).transferFrom(msg.sender, address(this), userTokenAmount);
-        ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), userTokenAmount);
-        StdPrecompiles.STABLECOIN_DEX.swapExactAmountOut({
+        ITIP20(userToken).transferFrom(msg.sender, address(this), maxAmountIn);
+        ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), maxAmountIn);
+        uint128 spentAmountIn = StdPrecompiles.STABLECOIN_DEX.swapExactAmountOut({
             tokenIn: userToken,
             tokenOut: targetToken,
             amountOut: SafeCast.toUint128(_nativeFee),
-            maxAmountIn: userTokenAmount
+            maxAmountIn: maxAmountIn
         });
+
+        // The DEX pulls tokenIn without consuming the allowance, so clear it rather than leave it dangling.
+        ITIP20(userToken).approve(address(StdPrecompiles.STABLECOIN_DEX), 0);
+        if (maxAmountIn > spentAmountIn) {
+            ITIP20(userToken).transfer(msg.sender, maxAmountIn - spentAmountIn);
+        }
 
         return targetToken;
     }
