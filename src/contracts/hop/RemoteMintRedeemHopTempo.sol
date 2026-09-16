@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import { SendParam, MessagingFee, IOFT } from "@fraxfinance/layerzero-v2-upgradeable/oapp/contracts/oft/interfaces/IOFT.sol";
-import { ITIP20 } from "@tempo/interfaces/ITIP20.sol";
+import { ITIP20 } from "tempo-std/interfaces/ITIP20.sol";
 import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { RemoteMintRedeemHop } from "./RemoteMintRedeemHop.sol";
 import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";

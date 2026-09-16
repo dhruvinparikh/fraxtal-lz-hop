@@ -3,8 +3,8 @@ pragma solidity 0.8.23;
 
 import { Test, console2 } from "forge-std/Test.sol";
 import { SendParam, MessagingFee, IOFT } from "@fraxfinance/layerzero-v2-upgradeable/oapp/contracts/oft/interfaces/IOFT.sol";
-import { ITIP20 } from "@tempo/interfaces/ITIP20.sol";
-import { IStablecoinDEX } from "@tempo/interfaces/IStablecoinDEX.sol";
+import { ITIP20 } from "tempo-std/interfaces/ITIP20.sol";
+import { IStablecoinDEX } from "tempo-std/interfaces/IStablecoinDEX.sol";
 import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { StdTokens } from "tempo-std/StdTokens.sol";
 import { RemoteMintRedeemHopTempo } from "src/contracts/hop/RemoteMintRedeemHopTempo.sol";
@@ -42,6 +42,12 @@ contract IntegratorCaller {
 ///         `--network tempo`, so this suite is not run by the stock `forge test`:
 ///
 ///         forge test --match-path src/test/hop/RemoteMintRedeemHopTempoE2E.t.sol --network tempo --evm-version shanghai -vv
+///
+/// @dev This suite is CI's canary for Tempo precompile behaviour the hop relies on but that no Solidity spec
+///      documents any more (the reference spec was removed upstream at tempo v1.1.0; the source of truth is
+///      tempoxyz/tempo `crates/precompiles/src/`): a contract may `setUserToken` for itself
+///      (`testFork_E2E_FeeTokenRebindingAcrossUsers`), the DEX may settle for more than it quoted
+///      (`testFork_E2E_FrxUsdFeeViaDex_SurvivesQuoteFillDivergence`), and the LZD whitelist decides the fee path.
 contract RemoteMintRedeemHopTempoE2EForkTest is Test {
     uint32 internal constant TEMPO_EID = 30_410;
     uint32 internal constant FRAXTAL_EID = 30_255;
