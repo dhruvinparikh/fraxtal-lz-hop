@@ -57,6 +57,8 @@ contract DeployRemoteHopTempo is DeployRemoteHop {
             _endpoint: TEMPO_ENDPOINT
         });
         console.log("RemoteMintRedeemHopTempo deployed at:", address(remoteMintRedeemHop));
+        // Register this address as remoteHop[30410] on the Fraxtal hub (ConnectFraxtalMintRedeemHop) right
+        // away: until then a hop lands on the hub with InvalidSourceChain and waits there for the wiring.
 
         vm.stopBroadcast();
     }

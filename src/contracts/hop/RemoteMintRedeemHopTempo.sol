@@ -36,9 +36,18 @@ import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
 ///      estimate for Fraxtal's return leg -- is retained on this contract, denominated in the collected
 ///      payment token instead of native. Sweep it with `recoverERC20`, not `recoverETH`.
 ///
+/// @dev frxUSD on Tempo is minted under a TIP-403 blacklist policy. A return packet addressed to a
+///      blacklisted recipient waits in the LayerZero payload store until they are unblocked; sfrxUSD
+///      carries no policy, so a frxUSD-blacklisted caller can still start an sfrxUSD -> frxUSD
+///      conversion whose delivery will wait the same way.
+///
 /// @author Frax Finance: https://github.com/FraxFinance
 contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
+    event FeeCollected(address indexed paymentToken, uint256 sendFee, uint256 retained);
+    event RecoveredERC20(address indexed token, address indexed recipient, uint256 amount);
+
     error InvalidFeeToken();
+    error NotImplemented();
 
     constructor(
         address _owner,
@@ -64,6 +73,19 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     /// @param _bps Allowance in bps, capped by MAX_FEE_SWAP_SLIPPAGE_BPS. 0 restores the default.
     function setFeeSwapSlippageBps(uint16 _bps) external onlyOwner {
         _setFeeSwapSlippageBps(_bps);
+    }
+
+    /// @notice Sweep a token held here -- the retained return-leg fees (pathUSD / USDC.e / USDT0) or
+    ///         anything stranded. Same signature as every other chain's hop, with the transfer checked.
+    function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external override onlyOwner {
+        SafeERC20.safeTransfer(IERC20(tokenAddress), recipient, tokenAmount);
+        emit RecoveredERC20(tokenAddress, recipient, tokenAmount);
+    }
+
+    /// @dev Tempo has no native path into this contract (value-carrying calls fail at the EVM), so the
+    ///      inherited sweep would only ever be a silent no-op. Say so instead.
+    function recoverETH(address, uint256) external view override onlyOwner {
+        revert NotImplemented();
     }
 
     /// @inheritdoc RemoteMintRedeemHop
@@ -124,10 +146,14 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         SendParam memory sendParam = _generateSendParam({ _to: _to, _amountLD: _amountLD, _minAmountLD: _amountLD });
         MessagingFee memory fee = _quoteSendRebindingOnFailure(_oft, sendParam, _feeToken);
 
-        // Collect the outbound fee and the retained return-leg estimate in one debit, so the caller
-        // makes a single approval and there is no native refund to hand back.
-        address paymentToken = _collectNativeAltToken(fee.nativeFee + quoteHop(), _feeToken, _maxFeeTokenAmount);
-        _bindFeeToken(paymentToken);
+        // Collect the outbound fee and the retained return-leg estimate in one debit of the fee token,
+        // so there is a single fee pull and no native refund to hand back.
+        uint256 retained = quoteHop();
+        address paymentToken = _collectNativeAltToken(fee.nativeFee + retained, _feeToken, _maxFeeTokenAmount);
+        if (paymentToken != address(0)) {
+            _bindFeeToken(paymentToken);
+            emit FeeCollected(paymentToken, fee.nativeFee, retained);
+        }
         _approveOftFee(_oft, paymentToken, _amountLD, fee.nativeFee);
 
         IOFT(_oft).send(sendParam, fee, address(this));
@@ -168,12 +194,14 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         return _quoteUserTokenFee(_userToken, quote(_oft, _to, _amountLD).nativeFee);
     }
 
-    /// @dev Approves the OFT for the bridged amount and, when the fee rides on a different token, for
-    ///      the fee as well. When both are the same TIP20 they must be approved as a single combined
-    ///      allowance -- two `approve` calls would overwrite one another and under-fund the send.
+    /// @dev Approves the OFT for the bridged amount -- only when it pulls with `transferFrom`; a mintable
+    ///      OFT burns from the caller and would just be left holding a dead self-allowance -- and, when the
+    ///      fee rides on a different token, for the fee as well. When both are the same TIP20 they must be
+    ///      approved as a single combined allowance: two `approve` calls would overwrite one another and
+    ///      under-fund the send.
     function _approveOftFee(address _oft, address _paymentToken, uint256 _amountLD, uint256 _nativeFee) internal {
         address oftToken = IOFT(_oft).token();
-        uint256 oftTokenAllowance = _amountLD;
+        uint256 oftTokenAllowance = IOFT(_oft).approvalRequired() ? _amountLD : 0;
 
         if (_nativeFee > 0) {
             if (_paymentToken == oftToken) {

@@ -71,11 +71,11 @@ contract RemoteMintRedeemHop is Ownable2Step {
     }
 
     // Admin functions
-    function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external onlyOwner {
+    function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external virtual onlyOwner {
         IERC20(tokenAddress).transfer(recipient, tokenAmount);
     }
 
-    function recoverETH(address recipient, uint256 tokenAmount) external onlyOwner {
+    function recoverETH(address recipient, uint256 tokenAmount) external virtual onlyOwner {
         payable(recipient).call{ value: tokenAmount }("");
     }
 

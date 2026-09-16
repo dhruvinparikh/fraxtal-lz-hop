@@ -40,8 +40,10 @@ abstract contract TempoGasTokenBase {
     /// @dev 0 means "use the default"; read through `feeSwapSlippageBps()`.
     uint16 private _feeSwapSlippageBps;
 
+    /// @dev Fails deployment, not the first send, if `_lzEndpoint` is not an EndpointV2Alt.
     constructor(address _lzEndpoint) {
         nativeToken = ILZEndpointDollar(IEndpointV2Alt(_lzEndpoint).nativeToken());
+        if (address(nativeToken) == address(0)) revert NativeTokenUnavailable();
     }
 
     // ─── Fee-Swap Slippage ───────────────────────────────────────────────
@@ -172,13 +174,14 @@ abstract contract TempoGasTokenBase {
     ///      debiting `userToken`. Reverts `FeeAboveCap` before pulling anything if the debit -- the
     ///      figure `quoteUserTokenFee` reports for the same inputs -- would exceed `_maxUserTokenAmount`.
     ///      This is useful for callers that need to split one collected payment across multiple consumers.
+    /// @return paymentToken The whitelisted token now held for the fee, or address(0) when there was
+    ///         nothing to collect -- never a token that was not actually collected.
     function _collectNativeAltToken(
         uint256 _nativeFee,
         address userToken,
         uint256 _maxUserTokenAmount
     ) internal returns (address paymentToken) {
-        if (_nativeFee == 0) return userToken;
-        if (address(nativeToken) == address(0)) revert NativeTokenUnavailable();
+        if (_nativeFee == 0) return address(0);
 
         // If the user's token is already whitelisted, collect it directly.
         if (nativeToken.isWhitelistedToken(userToken)) {

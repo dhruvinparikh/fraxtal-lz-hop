@@ -10,6 +10,15 @@ import { IOFT2 } from "src/contracts/hop/interfaces/IOFT2.sol";
 import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @dev Exposes the base's fee collector so its zero-fee branch can be pinned without a full send.
+contract CollectorHarness is TempoGasTokenBase {
+    constructor(address _endpoint) TempoGasTokenBase(_endpoint) {}
+
+    function collect(uint256 _fee, address _token) external returns (address) {
+        return _collectNativeAltToken(_fee, _token, type(uint256).max);
+    }
+}
+
 interface IEndpointV2AltLike {
     function nativeToken() external view returns (address);
 }
@@ -18,14 +27,12 @@ interface ISendLibraryLike {
     function treasury() external view returns (address);
 }
 
-/// @notice Fork coverage for the Tempo variant of the mint/redeem hop.
+/// @notice Fork coverage for the Tempo variant of the mint/redeem hop that does not need Tempo's precompiles.
 ///
-/// @dev The fee-collection path (`_collectNativeAltToken` -> FeeManager / StablecoinDEX) is NOT
-///      exercised here: Tempo's precompiles abort with `EvmError: OpcodeNotFound` under stock foundry,
-///      so any test that reaches them fails for environmental reasons rather than contract ones. The
-///      same limitation already affects hop-v2's `RemoteHopV2TempoForkTest`. Everything reachable
-///      without the precompiles is covered below; the swap path needs Tempo-patched foundry or a
-///      testnet run.
+/// @dev Under stock foundry, Tempo's precompiles (TIP20s, FeeManager, StablecoinDEX) abort with
+///      `EvmError: OpcodeNotFound`, so the tests that read them are guarded with `vm.skip`. Run with
+///      `--network tempo` (forge >= 1.8) to execute those too; the fee-collection path itself is covered
+///      end-to-end by `RemoteMintRedeemHopTempoE2E.t.sol`, which only runs under that flag.
 contract RemoteMintRedeemHopTempoForkTest is Test {
     uint32 internal constant TEMPO_EID = 30_410;
 
@@ -88,19 +95,58 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
     }
 
     /// @dev Native gas sent here would be stranded -- the OFT is paid in TIP20, so reject it loudly.
+    ///      Under Tempo's EVM (`--network tempo`) a value-carrying CALL already fails before the callee runs,
+    ///      with empty revert data; under stock foundry the contract's own guard answers. Both are rejections.
     function testFork_MintRedeemRejectsMsgValue() public {
-        vm.deal(user, 1 ether);
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.OFTAltCore__msg_value_not_zero.selector, 1 wei));
-        hop.mintRedeem{ value: 1 wei }(FRXUSD_OFT, 1e6);
+        _assertValueCallRejected(FRXUSD_OFT, 1e6);
     }
 
     /// @dev msg.value is rejected before anything else, so a bad OFT with value still reports the value error.
     function testFork_MsgValueCheckPrecedesOftCheck() public {
+        _assertValueCallRejected(WFRAX_OFT, 1e18);
+    }
+
+    function _assertValueCallRejected(address _oft, uint256 _amount) internal {
         vm.deal(user, 1 ether);
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.OFTAltCore__msg_value_not_zero.selector, 1 wei));
-        hop.mintRedeem{ value: 1 wei }(WFRAX_OFT, 1e18);
+        (bool ok, bytes memory data) = address(hop).call{ value: 1 wei }(
+            abi.encodeCall(RemoteMintRedeemHop.mintRedeem, (_oft, _amount))
+        );
+        assertFalse(ok, "value call must be rejected");
+        if (data.length > 0) {
+            assertEq(
+                data,
+                abi.encodeWithSelector(TempoGasTokenBase.OFTAltCore__msg_value_not_zero.selector, 1 wei),
+                "when the contract's guard runs it must report the value error"
+            );
+        }
+    }
+
+    /// @dev Deploying against an endpoint that is not an EndpointV2Alt fails at construction, not on first use.
+    function testFork_ConstructorRejectsNonAltEndpoint() public {
+        address treasury = ISendLibraryLike(SEND_LIBRARY).treasury(); // resolve before expectRevert
+        vm.mockCall(TEMPO_ENDPOINT, abi.encodeWithSignature("nativeToken()"), abi.encode(address(0)));
+        vm.expectRevert(TempoGasTokenBase.NativeTokenUnavailable.selector);
+        new RemoteMintRedeemHopTempo({
+            _owner: TEMPO_MSIG,
+            _fraxtalHop: bytes32(uint256(uint160(FRAXTAL_MINTREDEEM_HOP))),
+            _numDVNs: NUM_DVNS,
+            _EXECUTOR: EXECUTOR,
+            _DVN: DVN,
+            _TREASURY: treasury,
+            _EID: TEMPO_EID,
+            _frxUsdOft: FRXUSD_OFT,
+            _sfrxUsdOft: SFRXUSD_OFT,
+            _endpoint: TEMPO_ENDPOINT
+        });
+        vm.clearMockedCalls();
+    }
+
+    /// @dev A zero fee collects nothing and must say so: returning the caller's raw token here would let the
+    ///      hop bind and approve a token it never received.
+    function testFork_ZeroFeeCollectsNothing() public {
+        CollectorHarness collector = new CollectorHarness(TEMPO_ENDPOINT);
+        assertEq(collector.collect(0, address(0xBEEF)), address(0), "zero fee -> no payment token");
     }
 
     /// @dev DEX-routed fee swaps carry a slippage allowance (the DEX quotes per tick but settles per order,
@@ -133,6 +179,17 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
         vm.prank(user);
         vm.expectRevert(RemoteMintRedeemHopTempo.InvalidFeeToken.selector);
         hop.mintRedeem(FRXUSD_OFT, 1e6, address(0), type(uint256).max);
+    }
+
+    /// @dev Recovery is owner-only; the native sweep is dead on Tempo and says so rather than silently no-op.
+    function testFork_RecoveryIsOwnerOnlyAndNativeIsNotImplemented() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
+        hop.recoverERC20(address(0xBEEF), user, 1);
+
+        vm.prank(TEMPO_MSIG);
+        vm.expectRevert(RemoteMintRedeemHopTempo.NotImplemented.selector);
+        hop.recoverETH(TEMPO_MSIG, 1);
     }
 
     function testFork_MintRedeemRejectsUnapprovedOft() public {

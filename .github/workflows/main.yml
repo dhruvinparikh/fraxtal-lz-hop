@@ -42,4 +42,14 @@ jobs:
           TEMPO_RPC_URL: ${{ secrets.TEMPO_RPC_URL || 'https://rpc.tempo.xyz' }}
         run: >-
           forge test --network tempo --evm-version shanghai --match-path
-          'src/test/hop/RemoteMintRedeemHopTempoE2E.t.sol'
+          'src/test/hop/RemoteMintRedeemHopTempo*.t.sol'
+      # Fraxtal hub compose budget for the Tempo lane: measures the live hub's lzCompose against the
+      # 1M compose option the hop hard-codes, so a change in the ERC4626 mint/redeemer or the DVN set
+      # shows up here before composes start needing manual retries. Cancun because the mint/redeemer
+      # uses transient storage.
+      - name: Fraxtal compose-gas check
+        env:
+          FRAXTAL_RPC_URL: ${{ secrets.FRAXTAL_RPC_URL || 'https://rpc.frax.com' }}
+        run: >-
+          forge test --evm-version cancun --match-path
+          'src/test/hop/FraxtalMintRedeemHopTempoLaneTest.t.sol'

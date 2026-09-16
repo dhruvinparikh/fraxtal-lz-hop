@@ -75,6 +75,8 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
     bytes32 internal to;
 
     event MintRedeem(address oft, address indexed sender, uint256 amountLD);
+    event FeeCollected(address indexed paymentToken, uint256 sendFee, uint256 retained);
+    event RecoveredERC20(address indexed token, address indexed recipient, uint256 amount);
 
     function setUp() public {
         vm.createSelectFork(_rpc());
@@ -127,6 +129,8 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount);
         ITIP20(PATH_USD).approve(address(hop), feeInPath);
+        vm.expectEmit(true, true, true, true, address(hop));
+        emit FeeCollected(PATH_USD, q.nativeFee - hopFee, hopFee);
         vm.expectEmit(true, true, true, true, address(hop));
         emit MintRedeem(FRXUSD_OFT, user, amount);
         hop.mintRedeem(FRXUSD_OFT, amount);
@@ -281,6 +285,9 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
             1,
             "one packet sent"
         );
+        // A mintable OFT burns from the caller, so the hop must not leave a dead self-allowance behind.
+        assertFalse(IOFT(SFRXUSD_OFT).approvalRequired(), "sfrxUSD OFT burns without allowance");
+        assertEq(IERC20Like(SFRXUSD_OFT).allowance(address(hop), SFRXUSD_OFT), 0, "no residual sfrxUSD allowance");
     }
 
     /// @dev Two users with different whitelisted fee tokens back-to-back: the hop must re-bind its FeeManager token
@@ -525,9 +532,13 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         testFork_E2E_FrxUsd_PathUsdFee();
         uint256 retained = _bal(PATH_USD, address(hop));
         assertGt(retained, 0);
+        uint256 msig0 = _bal(PATH_USD, TEMPO_MSIG);
         vm.prank(TEMPO_MSIG);
+        vm.expectEmit(true, true, true, true, address(hop));
+        emit RecoveredERC20(PATH_USD, TEMPO_MSIG, retained);
         hop.recoverERC20(PATH_USD, TEMPO_MSIG, retained);
-        assertEq(_bal(PATH_USD, address(hop)), 0);
+        assertEq(_bal(PATH_USD, address(hop)), 0, "swept");
+        assertEq(_bal(PATH_USD, TEMPO_MSIG) - msig0, retained, "landed with the recipient");
     }
 
     // ───────────────────────── book shaping (M-1 regression) ─────────────────────────
