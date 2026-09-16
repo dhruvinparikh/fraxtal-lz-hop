@@ -84,15 +84,32 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     ///      swap, then sends with zero value.
     function _mintRedeemViaFraxtal(address _oft, bytes32 _to, uint256 _amountLD) internal virtual override {
         SendParam memory sendParam = _generateSendParam({ _to: _to, _amountLD: _amountLD, _minAmountLD: _amountLD });
-        MessagingFee memory fee = IOFT(_oft).quoteSend(sendParam, false);
+        MessagingFee memory fee = _quoteSendRebindingOnFailure(_oft, sendParam);
 
         // Collect the outbound fee and the retained return-leg estimate in one debit, so the caller
         // makes a single approval and there is no native refund to hand back.
         address paymentToken = _collectNativeAltToken(fee.nativeFee + quoteHop());
-        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(paymentToken);
+        _bindFeeToken(paymentToken);
         _approveOftFee(_oft, paymentToken, _amountLD, fee.nativeFee);
 
         IOFT(_oft).send(sendParam, fee, address(this));
+    }
+
+    /// @dev The OFT's quote validates THIS contract's FeeManager binding, which is whatever the previous
+    ///      call paid with. Normally that token is still LZ-whitelisted and the quote just works. If
+    ///      LayerZero has since delisted it and the DEX has no route out of it, the quote reverts -- so
+    ///      re-bind to the current caller's token (as FraxOFTWalletUpgradeableTempo does up front) and
+    ///      quote again. Free on the happy path; an inherited binding can never wedge the hop.
+    function _quoteSendRebindingOnFailure(
+        address _oft,
+        SendParam memory _sendParam
+    ) internal returns (MessagingFee memory fee) {
+        try IOFT(_oft).quoteSend(_sendParam, false) returns (MessagingFee memory _fee) {
+            return _fee;
+        } catch {
+            _bindFeeToken(_resolveUserToken());
+            return IOFT(_oft).quoteSend(_sendParam, false);
+        }
     }
 
     /// @notice Fee a caller must hold and approve in `_userToken` to bridge `_amountLD` (on top of

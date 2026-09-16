@@ -78,6 +78,16 @@ abstract contract TempoGasTokenBase {
         }
     }
 
+    // ─── Fee-Token Binding ───────────────────────────────────────────────
+
+    /// @dev Binds this contract's own FeeManager fee token, skipping the write when it is already
+    ///      `_token`: a no-op `setUserToken` still costs a full precompile call, a read does not.
+    function _bindFeeToken(address _token) internal {
+        if (StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(this)) != _token) {
+            StdPrecompiles.TIP_FEE_MANAGER.setUserToken(_token);
+        }
+    }
+
     // ─── Swap Routing ────────────────────────────────────────────────────
 
     /// @dev Finds the best whitelisted token that can be swapped to from `_userToken`.

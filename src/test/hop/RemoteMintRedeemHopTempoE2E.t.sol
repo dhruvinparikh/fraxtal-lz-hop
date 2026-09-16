@@ -9,6 +9,7 @@ import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { StdTokens } from "tempo-std/StdTokens.sol";
 import { RemoteMintRedeemHopTempo } from "src/contracts/hop/RemoteMintRedeemHopTempo.sol";
 import { RemoteMintRedeemHop } from "src/contracts/hop/RemoteMintRedeemHop.sol";
+import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
 import { ILZEndpointDollar } from "src/contracts/interfaces/vendor/layerzero/ILZEndpointDollar.sol";
 
 interface ISendLibraryLike {
@@ -320,6 +321,53 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.stopPrank();
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop re-bound to pathUSD");
         assertEq(_bal(PATH_USD, address(hop)) - hopPath0, hop.quoteHop(), "hop retains hop fee in pathUSD");
+    }
+
+    /// @dev Regression for the stale-binding ordering (L-1 in the 2026-09-16 review). The OFT's quote validates
+    ///      THIS contract's FeeManager binding, which used to be whatever the previous caller paid with. Had that
+    ///      token later left the LZD whitelist with no DEX route out of it, every quote -- and so every
+    ///      mintRedeem -- would have reverted before the re-bind could run, with no way back. The hop now
+    ///      re-binds to the current caller's token and quotes again when the OFT rejects the inherited binding,
+    ///      so it can never block the next call.
+    function testFork_E2E_InheritedBindingCannotBlockNextCaller() public {
+        uint256 amount = 10e6;
+
+        // A previous USDC.e payer left the hop bound to USDC.e (only the hop can write its own slot).
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), USDC_E, "hop inherits USDC.e binding");
+
+        // LayerZero then delists USDC.e, and the DEX has no route out of it.
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.isWhitelistedToken, (USDC_E)), abi.encode(false));
+        vm.mockCallRevert(
+            DEX,
+            abi.encodeWithSelector(IStablecoinDEX.quoteSwapExactAmountOut.selector, USDC_E),
+            abi.encodeWithSelector(IStablecoinDEX.InsufficientLiquidity.selector)
+        );
+
+        // The inherited binding now poisons the OFT's quote, which is what the hop's own view runs.
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.NoSwappableWhitelistedToken.selector, USDC_E));
+        hop.quote(FRXUSD_OFT, to, amount);
+
+        // A pathUSD payer still gets through: the hop binds pathUSD before it quotes.
+        uint256 hopFee = hop.quoteHop();
+        uint256 uPath0 = _bal(PATH_USD, user);
+        uint256 hopPath0 = _bal(PATH_USD, address(hop));
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount);
+        ITIP20(PATH_USD).approve(address(hop), 5e6);
+        hop.mintRedeem(FRXUSD_OFT, amount); // reverted NoSwappableWhitelistedToken(USDC.e) without the retry
+        vm.stopPrank();
+
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop re-bound to pathUSD");
+        assertGt(uPath0 - _bal(PATH_USD, user), hopFee, "fee paid in pathUSD");
+        assertEq(_bal(PATH_USD, address(hop)) - hopPath0, hopFee, "hop retains quoteHop() in pathUSD");
+        assertEq(_bal(frxUsd, address(hop)), 0, "no frxUSD stranded on hop");
+
+        // The successful call healed the view for everyone else, too.
+        MessagingFee memory q = hop.quote(FRXUSD_OFT, to, amount);
+        assertGt(q.nativeFee, 0, "quote healthy again");
+        vm.clearMockedCalls();
     }
 
     /// @dev Contract callers that never set a fee token are charged in pathUSD.
