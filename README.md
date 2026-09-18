@@ -98,7 +98,7 @@ Tempo's LayerZero endpoint is an `EndpointV2Alt`: message fees are charged in an
 // Tempo frxUSD => (Fraxtal) => Tempo sfrxUSD, fee paid in pathUSD
 
 address oft = 0x00000000D61733e7A393A10A5B48c311AbE8f1E5;      // frxUSD OFT on Tempo (TIP20 adapter, 6 decimals)
-address mintRedeemHop = /* RemoteMintRedeemHopTempo, see deployed contracts below */;
+address mintRedeemHop = 0xD512291495ADDBcEC271b5FF802868F5d2f7f83F; // RemoteMintRedeemHopTempo, see deployed contracts below
 address feeToken = 0x20C0000000000000000000000000000000000000; // pathUSD (LZ-whitelisted: pulled 1:1, no swap)
 uint256 amount = 1e6;                                          // 1 frxUSD
 bytes32 to = bytes32(uint256(uint160(msg.sender)));            // the hop always returns the tokens to msg.sender
@@ -157,6 +157,7 @@ IMintRedeemHopTempo(mintRedeemHop).mintRedeem(oft, amount, feeToken, maxFee);
 | Monad | [`0x40f66fff44dbbee88058185f2cfe287558d7e532`](https://monadscan.com/address/0x40f66fff44dbbee88058185f2cfe287558d7e532) | [`0x92e6892706053ee85fc1178affcb3803118d2c4f`](https://monadscan.com/address/0x92e6892706053ee85fc1178affcb3803118d2c4f) |
 | Somnia | n/a | [`0xE9e53734D2b67Ae263089d7a5dE1F5d97ab8cBDD`](https://explorer.somnia.network/address/0xE9e53734D2b67Ae263089d7a5dE1F5d97ab8cBDD) |
 | Robinhood | n/a | [`0xEfb78823eDCB57d78975a33576A7361dBD154d64`](https://robinhoodchain.blockscout.com/address/0xEfb78823eDCB57d78975a33576A7361dBD154d64) |
+| Tempo | n/a | [`0xD512291495ADDBcEC271b5FF802868F5d2f7f83F`](https://explore.tempo.xyz/address/0xD512291495ADDBcEC271b5FF802868F5d2f7f83F) (`RemoteMintRedeemHopTempo`, TIP20 fees — see [MintRedeemHop on Tempo](#mintredeemhop-on-tempo)) |
 
 ### Testnet
 | Chain | `RemoteHop` |
