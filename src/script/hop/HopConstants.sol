@@ -168,12 +168,6 @@ contract HopConstants {
             0xF6f45CCB5E85D1400067ee66F9e168f83e86124E,
             0x91DDB0E0C36B901C6BF53B9Eb5ACa0Eb1465F558
         );
-        _addLegacyHopTarget(
-            1313161554,
-            "Aurora",
-            0x53e36C8380Ff62D7964BFa4868A0045E58A52344,
-            0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2
-        );
     }
 
     function _legacyHopTargetFor(uint256 chainId) internal view returns (LegacyHopTarget storage target) {
