@@ -97,12 +97,6 @@ contract HopConstants {
             0x0255a172d0a060F2bEab3e7c12334dD73cCC26ba
         );
         _addLegacyHopTarget(
-            2741,
-            "Abstract",
-            0xc5e4A0cfef8D801278927C25fB51C1DB7b69dDFb,
-            0xa05E9F9B97c963B5651ed6A50Fae46625a8C400b
-        );
-        _addLegacyHopTarget(
             8453,
             "Base",
             0x3Ec3849C33291a9eF4c5dB86De593EB4A37fDe45,
