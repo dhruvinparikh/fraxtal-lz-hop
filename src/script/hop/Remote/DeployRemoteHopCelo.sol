@@ -15,11 +15,10 @@ contract DeployRemoteHopCelo is DeployRemoteHop {
         DVN = 0x75b073994560A5c03Cd970414d9170be0C6e5c36;
         SEND_LIBRARY = 0x42b4E9C6495B4cFDaE024B1eC32E09F28027620e;
 
-        // Celo Safe not created yet: owner stays unset so _validateAddrs() refuses to run
-        // owner = ;
+        owner = 0xFfdBB6221390d05366df8F6733E586c8CE92103C;
 
-        // Fraxtal -> Celo (eid 30125) is configured with 4 required DVNs: there is no Frax DVN on Celo
-        numDVNs = 4;
+        // Fraxtal -> Celo (eid 30125) opens only with all 5 required DVNs, Frax DVN included
+        numDVNs = 5;
 
         frxUsdOft = 0x00000000D61733e7A393A10A5B48c311AbE8f1E5;
         sfrxUsdOft = 0x00000000fD8C4B8A413A06821456801295921a71;
