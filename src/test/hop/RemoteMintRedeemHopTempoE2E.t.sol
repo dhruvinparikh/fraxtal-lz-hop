@@ -28,12 +28,13 @@ interface IERC20Like {
     function transfer(address, uint256) external returns (bool);
 }
 
-/// @dev Integrator-style caller: a contract that never called setUserToken, so the hop must fall back to pathUSD.
+/// @dev Integrator-style caller: a contract that never called setUserToken, paying in the token it names with the
+///      quote as its cap.
 contract IntegratorCaller {
     function go(RemoteMintRedeemHopTempo hop, address oft, uint256 amountLD, address feeToken, uint256 fee) external {
         IERC20Like(IOFT(oft).token()).approve(address(hop), amountLD);
         IERC20Like(feeToken).approve(address(hop), fee);
-        hop.mintRedeem(oft, amountLD);
+        hop.mintRedeem(oft, amountLD, feeToken, fee);
     }
 }
 
@@ -133,7 +134,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         emit FeeCollected(PATH_USD, q.nativeFee - hopFee, hopFee);
         vm.expectEmit(true, true, true, true, address(hop));
         emit MintRedeem(FRXUSD_OFT, user, amount);
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, feeInPath);
         vm.stopPrank();
 
         assertEq(uFrx0 - _bal(frxUsd, user), amount, "user debited bridged amount");
@@ -161,10 +162,6 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
     /// @dev frxUSD is not LZD-whitelisted, so the fee is swapped on the DEX. The hop pulls the quote plus the
     ///      slippage allowance, settles, and refunds whatever the swap did not consume.
     function testFork_E2E_FrxUsd_FrxUsdFeeViaDex() public {
-        vm.prank(user, user);
-        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(frxUsd);
-        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(user), frxUsd, "user fee token = frxUSD");
-
         uint256 amount = 10e6;
         MessagingFee memory q = hop.quote(FRXUSD_OFT, to, amount);
         uint256 hopFee = hop.quoteHop();
@@ -183,7 +180,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
 
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount + feeInFrx);
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, feeInFrx);
         vm.stopPrank();
 
         uint256 spent = uFrx0 - _bal(frxUsd, user) - amount;
@@ -222,9 +219,6 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
     ///      Build such a book for the hop's actual fee size, prove the un-padded swap fails on it, then prove
     ///      `mintRedeem` succeeds and refunds the unspent headroom.
     function testFork_E2E_FrxUsdFeeViaDex_SurvivesQuoteFillDivergence() public {
-        vm.prank(user, user);
-        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(frxUsd);
-
         uint256 amount = 10e6;
         uint128 needOut = uint128(hop.quote(FRXUSD_OFT, to, amount).nativeFee);
 
@@ -244,7 +238,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
 
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount + feeInFrx);
-        hop.mintRedeem(FRXUSD_OFT, amount); // reverted MaxInputExceeded before the fix
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, feeInFrx); // reverted MaxInputExceeded before the fix
         vm.stopPrank();
 
         uint256 spent = uFrx0 - _bal(frxUsd, user) - amount;
@@ -272,7 +266,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         IERC20Like(SFRXUSD_OFT).approve(address(hop), amount);
         ITIP20(PATH_USD).approve(address(hop), q.nativeFee);
-        hop.mintRedeem(SFRXUSD_OFT, amount);
+        hop.mintRedeem(SFRXUSD_OFT, amount, PATH_USD, q.nativeFee);
         vm.stopPrank();
 
         assertEq(s0 - _bal(SFRXUSD_OFT, user), amount, "user debited sfrxUSD");
@@ -307,9 +301,6 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
             console2.log("no frxUSD->USDC.e route on this fork; skipping rebinding test");
             vm.skip(true);
         }
-        vm.prank(userB, userB);
-        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
-
         uint256 amount = 5e6;
         bytes32 toB = bytes32(uint256(uint160(userB)));
         MessagingFee memory qB = hop.quote(FRXUSD_OFT, toB, amount);
@@ -319,7 +310,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(userB);
         ITIP20(frxUsd).approve(address(hop), amount);
         ITIP20(USDC_E).approve(address(hop), qB.nativeFee);
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, USDC_E, qB.nativeFee);
         vm.stopPrank();
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), USDC_E, "hop bound to USDC.e");
         assertEq(_bal(USDC_E, address(hop)) - hopUsdc0, hopFee, "hop retains hop fee in USDC.e");
@@ -330,7 +321,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount);
         ITIP20(PATH_USD).approve(address(hop), qA.nativeFee);
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, qA.nativeFee);
         vm.stopPrank();
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop re-bound to pathUSD");
         assertEq(_bal(PATH_USD, address(hop)) - hopPath0, hop.quoteHop(), "hop retains hop fee in pathUSD");
@@ -369,7 +360,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount);
         ITIP20(PATH_USD).approve(address(hop), 5e6);
-        hop.mintRedeem(FRXUSD_OFT, amount); // reverted NoSwappableWhitelistedToken(USDC.e) without the retry
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, 5e6); // reverted NoSwappableWhitelistedToken(USDC.e) without the retry
         vm.stopPrank();
 
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop re-bound to pathUSD");
@@ -469,7 +460,8 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop bound to pathUSD");
     }
 
-    /// @dev feeTokenOf tells integrators which token the two-argument mintRedeem will pull, so they can quote it.
+    /// @dev feeTokenOf tells integrators which token the caller's FeeManager would charge, so a UI can default
+    ///      the named fee token to it.
     function testFork_E2E_FeeTokenOfView() public {
         assertEq(hop.feeTokenOf(user), PATH_USD, "unset -> pathUSD");
         assertEq(hop.feeTokenOf(address(new IntegratorCaller())), PATH_USD, "fresh contract -> pathUSD");
@@ -478,8 +470,22 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         assertEq(hop.feeTokenOf(user), USDC_E, "set -> that token");
     }
 
-    /// @dev Contract callers that never set a fee token are charged in pathUSD.
-    function testFork_E2E_ContractCallerDefaultsToPathUsd() public {
+    /// @dev The native hop's two-argument mintRedeem is disabled on Tempo (no msg.value, so no fee ceiling): it
+    ///      reverts FeeCapRequired before pulling anything, even with every approval in place.
+    function testFork_E2E_TwoArgMintRedeemDisabled() public {
+        uint256 amount = 10e6;
+        uint256 uFrx0 = _bal(frxUsd, user);
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount);
+        ITIP20(PATH_USD).approve(address(hop), 5e6);
+        vm.expectRevert(RemoteMintRedeemHopTempo.FeeCapRequired.selector);
+        hop.mintRedeem(FRXUSD_OFT, amount);
+        vm.stopPrank();
+        assertEq(_bal(frxUsd, user), uFrx0, "nothing pulled");
+    }
+
+    /// @dev Contract callers pay in the token they name; one that never set a FeeManager token needs no binding.
+    function testFork_E2E_ContractCallerPaysInNamedToken() public {
         IntegratorCaller caller = new IntegratorCaller();
         vm.prank(FRXUSD_OFT);
         ITIP20(frxUsd).mint(address(caller), 20e6);
@@ -504,7 +510,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         ITIP20(frxUsd).approve(address(hop), amount);
         // no pathUSD approval
         vm.expectRevert();
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, type(uint256).max);
         vm.stopPrank();
         assertEq(_bal(frxUsd, user), uFrx0, "revert is atomic: frxUSD not pulled");
     }
@@ -515,15 +521,24 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         ITIP20(PATH_USD).approve(address(hop), q.nativeFee);
         vm.expectRevert();
-        hop.mintRedeem(FRXUSD_OFT, amount);
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, q.nativeFee);
         vm.stopPrank();
     }
 
-    /// @dev Under Tempo EVM semantics a CALL carrying value fails before the contract's own msg.value guard.
+    /// @dev Under Tempo EVM semantics a CALL carrying value fails before the callee runs; under stock foundry
+    ///      the non-payable entry point rejects it at the ABI boundary. Both are rejections.
     function testFork_E2E_ValueCallProbe() public {
         vm.deal(user, 1 ether);
         vm.prank(user);
-        (bool ok, ) = address(hop).call{ value: 1 }(abi.encodeCall(RemoteMintRedeemHop.mintRedeem, (FRXUSD_OFT, 1e6)));
+        (bool ok, ) = address(hop).call{ value: 1 }(
+            abi.encodeWithSignature(
+                "mintRedeem(address,uint256,address,uint256)",
+                FRXUSD_OFT,
+                1e6,
+                PATH_USD,
+                type(uint256).max
+            )
+        );
         assertFalse(ok, "value call must fail");
     }
 

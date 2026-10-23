@@ -45,6 +45,7 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
     address internal constant FRXUSD_OFT = 0x00000000D61733e7A393A10A5B48c311AbE8f1E5;
     address internal constant SFRXUSD_OFT = 0x00000000fD8C4B8A413A06821456801295921a71;
     address internal constant WFRAX_OFT = 0x00000000E9CE0f293D1Ce552768b187eBA8a56D4;
+    address internal constant PATH_USD = 0x20C0000000000000000000000000000000000000;
 
     address internal constant TEMPO_MSIG = 0x1Ba19a54a01AE967f5E3895764Caaa6919FD2bEe;
     uint256 internal constant NUM_DVNS = 5;
@@ -94,32 +95,35 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
         assertFalse(hop.paused(), "paused");
     }
 
-    /// @dev Native gas sent here would be stranded -- the OFT is paid in TIP20, so reject it loudly.
-    ///      Under Tempo's EVM (`--network tempo`) a value-carrying CALL already fails before the callee runs,
-    ///      with empty revert data; under stock foundry the contract's own guard answers. Both are rejections.
+    /// @dev The native hop's two-argument mintRedeem is disabled here: with no msg.value there is nothing to
+    ///      bound the fee pull, so the capped four-argument form is the only entry point. Reverts before
+    ///      touching anything, whatever the arguments.
+    function testFork_TwoArgMintRedeemIsDisabled() public {
+        vm.prank(user);
+        vm.expectRevert(RemoteMintRedeemHopTempo.FeeCapRequired.selector);
+        hop.mintRedeem(FRXUSD_OFT, 1e6);
+
+        vm.prank(user);
+        vm.expectRevert(RemoteMintRedeemHopTempo.FeeCapRequired.selector);
+        hop.mintRedeem(WFRAX_OFT, 1e18);
+    }
+
+    /// @dev Native gas sent here would be stranded -- the OFT is paid in TIP20 -- so the entry point is not
+    ///      payable. Under stock foundry the ABI boundary rejects the value; under Tempo's EVM
+    ///      (`--network tempo`) a value-carrying CALL already fails before the callee runs. Both are rejections.
     function testFork_MintRedeemRejectsMsgValue() public {
-        _assertValueCallRejected(FRXUSD_OFT, 1e6);
-    }
-
-    /// @dev msg.value is rejected before anything else, so a bad OFT with value still reports the value error.
-    function testFork_MsgValueCheckPrecedesOftCheck() public {
-        _assertValueCallRejected(WFRAX_OFT, 1e18);
-    }
-
-    function _assertValueCallRejected(address _oft, uint256 _amount) internal {
         vm.deal(user, 1 ether);
         vm.prank(user);
-        (bool ok, bytes memory data) = address(hop).call{ value: 1 wei }(
-            abi.encodeCall(RemoteMintRedeemHop.mintRedeem, (_oft, _amount))
+        (bool ok, ) = address(hop).call{ value: 1 wei }(
+            abi.encodeWithSignature(
+                "mintRedeem(address,uint256,address,uint256)",
+                FRXUSD_OFT,
+                1e6,
+                PATH_USD,
+                type(uint256).max
+            )
         );
         assertFalse(ok, "value call must be rejected");
-        if (data.length > 0) {
-            assertEq(
-                data,
-                abi.encodeWithSelector(TempoGasTokenBase.OFTAltCore__msg_value_not_zero.selector, 1 wei),
-                "when the contract's guard runs it must report the value error"
-            );
-        }
     }
 
     /// @dev Deploying against an endpoint that is not an EndpointV2Alt fails at construction, not on first use.
@@ -195,7 +199,7 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
     function testFork_MintRedeemRejectsUnapprovedOft() public {
         vm.prank(user);
         vm.expectRevert(RemoteMintRedeemHop.InvalidOFT.selector);
-        hop.mintRedeem(WFRAX_OFT, 1e18);
+        hop.mintRedeem(WFRAX_OFT, 1e18, PATH_USD, type(uint256).max);
     }
 
     function testFork_MintRedeemRespectsPause() public {
@@ -204,7 +208,7 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
 
         vm.prank(user);
         vm.expectRevert(RemoteMintRedeemHop.HopPaused.selector);
-        hop.mintRedeem(FRXUSD_OFT, 1e6);
+        hop.mintRedeem(FRXUSD_OFT, 1e6, PATH_USD, type(uint256).max);
     }
 
     /// @dev frxUSD on Tempo is a 6-decimal TIP20 adapter with decimalConversionRate 1, so removeDust is
@@ -215,7 +219,7 @@ contract RemoteMintRedeemHopTempoForkTest is Test {
 
         vm.prank(user);
         vm.expectRevert(RemoteMintRedeemHop.ZeroAmountSend.selector);
-        hop.mintRedeem(SFRXUSD_OFT, 1e11);
+        hop.mintRedeem(SFRXUSD_OFT, 1e11, PATH_USD, type(uint256).max);
     }
 
     /// @dev Fees are denominated in LZD (6 decimals), so a sane quote is dollars-and-cents sized, not

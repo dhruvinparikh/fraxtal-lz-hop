@@ -145,8 +145,8 @@ abstract contract TempoGasTokenBase {
     /// @param _userToken The TIP20 gas token to quote for.
     /// @param _endpointFee The fee in endpoint-native (LZEndpointDollar) units, as returned by quoteSend().
     /// @return The estimated amount of `_userToken` required, including the slippage allowance
-    ///         applied when the fee must be swapped. Approve at least this much; the unspent part
-    ///         of the allowance is refunded in the same call.
+    ///         applied when the fee must be swapped. Approve exactly this much and pass it as the
+    ///         fee cap; the unspent part of the allowance is refunded in the same call.
     function quoteUserTokenFee(address _userToken, uint256 _endpointFee) external view returns (uint256) {
         return _quoteUserTokenFee(_userToken, _endpointFee);
     }
@@ -163,12 +163,6 @@ abstract contract TempoGasTokenBase {
     }
 
     // ─── Fee Collection ──────────────────────────────────────────────────
-
-    /// @dev Collects `_nativeFee` worth of gas payment into this contract as a single whitelisted token,
-    ///      debiting the caller's FeeManager fee token with no cap.
-    function _collectNativeAltToken(uint256 _nativeFee) internal returns (address paymentToken) {
-        return _collectNativeAltToken(_nativeFee, _resolveUserToken(), type(uint256).max);
-    }
 
     /// @dev Collects `_nativeFee` worth of gas payment into this contract as a single whitelisted token,
     ///      debiting `userToken`. Reverts `FeeAboveCap` before pulling anything if the debit -- the

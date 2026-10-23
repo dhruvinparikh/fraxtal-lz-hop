@@ -31,6 +31,11 @@ import { TempoGasTokenBase } from "src/contracts/base/TempoGasTokenBase.sol";
 ///         swapped into a whitelisted stablecoin if needed, and the OFT consumes it through the
 ///         endpoint's alt-token path.
 ///
+///         The only entry point is the four-argument `mintRedeem(oft, amount, feeToken, maxFeeTokenAmount)`.
+///         The two-argument form of the native hop reverts `FeeCapRequired` here: with no `msg.value` there is
+///         nothing to bound the fee pull, and a fee that moved between quote and inclusion would be taken up
+///         to the caller's allowance.
+///
 /// @dev Fee bookkeeping mirrors the native chains. The caller pays `quoteSend + quoteHop()`; the
 ///      `quoteSend` portion is consumed by the outbound message and the `quoteHop()` portion -- the
 ///      estimate for Fraxtal's return leg -- is retained on this contract, denominated in the collected
@@ -47,6 +52,7 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     event RecoveredERC20(address indexed token, address indexed recipient, uint256 amount);
 
     error InvalidFeeToken();
+    error FeeCapRequired();
     error NotImplemented();
 
     constructor(
@@ -89,19 +95,19 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
     }
 
     /// @inheritdoc RemoteMintRedeemHop
-    /// @dev Rejects native value -- on Tempo the fee is debited as a TIP20 inside
-    ///      `_mintRedeemViaFraxtal`, so a caller sending gas here would simply strand it. The fee is
-    ///      pulled in `feeTokenOf(msg.sender)` with no cap; see the four-argument overload for both.
-    function mintRedeem(address _oft, uint256 _amountLD) external payable virtual override {
-        if (msg.value > 0) revert OFTAltCore__msg_value_not_zero(msg.value);
-        _mintRedeem(_oft, _amountLD, address(0), type(uint256).max);
+    /// @dev Disabled on Tempo. The native hop bounds the fee with `msg.value`; here the fee is pulled as a
+    ///      TIP20, so this form would let a fee that moved between quote and inclusion take whatever the
+    ///      caller's allowance permits. Use the four-argument overload, which names the token and caps it.
+    function mintRedeem(address, uint256) external payable virtual override {
+        revert FeeCapRequired();
     }
 
-    /// @notice As `mintRedeem(oft, amount)`, but the caller names the TIP20 the fee is pulled in and
-    ///         caps that debit -- the Tempo equivalent of the `msg.value` ceiling on native chains.
+    /// @notice Convert `_amountLD` of `_oft` into its counterpart via Fraxtal, naming the TIP20 the fee is
+    ///         pulled in and capping that debit -- the Tempo equivalent of the `msg.value` ceiling on native
+    ///         chains. The only mint/redeem entry point on Tempo; it takes no value.
     /// @param _feeToken TIP20 to pay the fee in. Pulled 1:1 when LZ-whitelisted, otherwise swapped on
-    ///        the DEX; `feeTokenOf(caller)` reproduces the two-argument behaviour.
-    /// @param _maxFeeTokenAmount Reverts `FeeAboveCap` -- before anything is pulled -- if the fee in
+    ///        the DEX; `feeTokenOf(caller)` is the token the caller's FeeManager would charge.
+    /// @param _maxFeeTokenAmount Reverts `FeeAboveCap` -- the whole call, nothing is kept -- if the fee in
     ///        `_feeToken`, as `quoteUserTokenFee(oft, caller, amount, feeToken)` reports it at execution,
     ///        exceeds this.
     function mintRedeem(
@@ -111,26 +117,20 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         uint256 _maxFeeTokenAmount
     ) external virtual {
         if (_feeToken == address(0)) revert InvalidFeeToken();
-        _mintRedeem(_oft, _amountLD, _feeToken, _maxFeeTokenAmount);
-    }
-
-    /// @dev `_feeToken == address(0)` means `feeTokenOf(msg.sender)`, resolved only once the cheap guards pass.
-    function _mintRedeem(address _oft, uint256 _amountLD, address _feeToken, uint256 _maxFeeTokenAmount) internal {
         if (paused) revert HopPaused();
         if (_oft != frxUsdOft && _oft != sfrxUsdOft) revert InvalidOFT();
 
         _amountLD = removeDust(_oft, _amountLD);
         if (_amountLD == 0) revert ZeroAmountSend();
-        if (_feeToken == address(0)) _feeToken = _resolveUserToken();
         SafeERC20.safeTransferFrom(IERC20(IOFT(_oft).token()), msg.sender, address(this), _amountLD);
         _mintRedeemViaFraxtal(_oft, bytes32(uint256(uint160(msg.sender))), _amountLD, _feeToken, _maxFeeTokenAmount);
 
         emit MintRedeem(_oft, msg.sender, _amountLD);
     }
 
-    /// @dev Parent hook; fee in `feeTokenOf(msg.sender)`, uncapped.
-    function _mintRedeemViaFraxtal(address _oft, bytes32 _to, uint256 _amountLD) internal virtual override {
-        _mintRedeemViaFraxtal(_oft, _to, _amountLD, _resolveUserToken(), type(uint256).max);
+    /// @dev Parent hook behind the disabled two-argument form: unreachable, and says so if it ever is.
+    function _mintRedeemViaFraxtal(address, bytes32, uint256) internal virtual override {
+        revert FeeCapRequired();
     }
 
     /// @dev Replaces the native-fee path: collects the full fee as one whitelisted TIP20, binds this

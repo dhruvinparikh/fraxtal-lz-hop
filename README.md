@@ -36,7 +36,8 @@ interface IMintRedeemHop {
     function quote(address oft, bytes32 toAsBytes32, uint256 amount) external view returns (MessagingFee memory fee);
     function mintRedeem(address oft, uint256 amount) external payable;
 }
-// Tempo only (RemoteMintRedeemHopTempo): fees are paid in a TIP20, never in msg.value
+// Tempo only (RemoteMintRedeemHopTempo): fees are paid in a TIP20, never in msg.value.
+// The inherited mintRedeem(oft, amount) reverts FeeCapRequired there; use the capped form.
 interface IMintRedeemHopTempo is IMintRedeemHop {
     function feeTokenOf(address caller) external view returns (address);
     function quoteUserTokenFee(address oft, bytes32 toAsBytes32, uint256 amount, address feeToken) external view returns (uint256);
@@ -91,7 +92,7 @@ Tempo's LayerZero endpoint is an `EndpointV2Alt`: message fees are charged in an
 - **Fee token.** A TIP20 that LayerZero whitelists (pathUSD `0x20C0…0000`, USDC.e, USDT0 today) is pulled 1:1. Any other TIP20 (e.g. frxUSD) is swapped on Tempo's StablecoinDEX into the cheapest whitelisted one, so it needs a live route there and carries a small swap headroom (default 50 bps, at least 1 unit) that is refunded in the same call; with no route the call reverts `NoSwappableWhitelistedToken`.
 - **Quote in the fee token.** `quote(oft, to, amount).nativeFee` is in LZEndpointDollar units (6 decimals). Use `quoteUserTokenFee(oft, to, amount, feeToken)` for the figure in the token you will actually pay with — it already includes the headroom and is the most the hop will debit.
 - **Two approvals.** The bridged token (`IOFT(oft).token()`) for `amount`, and the fee token for the quoted fee. If they are the same token (frxUSD paying in frxUSD), approve `amount + fee` once.
-- **Use the capped overload.** `mintRedeem(oft, amount, feeToken, maxFeeTokenAmount)` reverts `FeeAboveCap` before pulling anything if the live fee in `feeToken` exceeds the cap — the Tempo equivalent of the `msg.value` ceiling. The two-argument `mintRedeem(oft, amount)` still exists for ABI compatibility, but it pays in `feeTokenOf(caller)` (the caller's FeeManager fee token, pathUSD if unset) with no cap other than the ERC20 allowance.
+- **One entry point.** `mintRedeem(oft, amount, feeToken, maxFeeTokenAmount)` reverts `FeeAboveCap` — the whole call, nothing is kept — if the live fee in `feeToken` exceeds the cap: the Tempo equivalent of the `msg.value` ceiling. Approve exactly the quote and pass it as the cap. The two-argument `mintRedeem(oft, amount)` of the native hop reverts `FeeCapRequired` on Tempo: without `msg.value` nothing would bound the fee pull. `feeTokenOf(caller)` reports the token the caller's FeeManager would charge, for UIs that default the fee token to it.
 - **Decimals.** Amounts are in the OFT's own decimals: Tempo frxUSD is a 6-decimal TIP20 adapter, Tempo sfrxUSD a normal 18-decimal OFT.
 
 ```Solidity
