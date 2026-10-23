@@ -97,12 +97,6 @@ contract HopConstants {
             0x0255a172d0a060F2bEab3e7c12334dD73cCC26ba
         );
         _addLegacyHopTarget(
-            2741,
-            "Abstract",
-            0xc5e4A0cfef8D801278927C25fB51C1DB7b69dDFb,
-            0xa05E9F9B97c963B5651ed6A50Fae46625a8C400b
-        );
-        _addLegacyHopTarget(
             8453,
             "Base",
             0x3Ec3849C33291a9eF4c5dB86De593EB4A37fDe45,
@@ -167,12 +161,6 @@ contract HopConstants {
             "Scroll",
             0xF6f45CCB5E85D1400067ee66F9e168f83e86124E,
             0x91DDB0E0C36B901C6BF53B9Eb5ACa0Eb1465F558
-        );
-        _addLegacyHopTarget(
-            1313161554,
-            "Aurora",
-            0x53e36C8380Ff62D7964BFa4868A0045E58A52344,
-            0x8EbB34b1880B2EA5e458082590B3A2c9Ea7C41A2
         );
     }
 

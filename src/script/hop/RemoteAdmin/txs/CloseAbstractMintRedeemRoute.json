@@ -1,0 +1,17 @@
+{
+  "chainId": 252,
+  "createdAt": 1792423793000,
+  "meta": {
+    "description": "FraxtalMintRedeemHop.setRemoteHop(30324, bytes32(0)): close the deprecated Abstract route so inbound composes and quotes fail closed",
+    "name": "Transactions Batch"
+  },
+  "transactions": [
+    {
+      "data": "0xbcde532700000000000000000000000000000000000000000000000000000000000076740000000000000000000000000000000000000000000000000000000000000000",
+      "operation": "0",
+      "to": "0x3e6a2cBaFD864e09e6DAb9Cf035a0AbEa32bc0BC",
+      "value": "0"
+    }
+  ],
+  "version": "1.0"
+}
