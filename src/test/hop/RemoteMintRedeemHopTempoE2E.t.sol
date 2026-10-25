@@ -5,6 +5,7 @@ import { Test, console2 } from "forge-std/Test.sol";
 import { SendParam, MessagingFee, IOFT } from "@fraxfinance/layerzero-v2-upgradeable/oapp/contracts/oft/interfaces/IOFT.sol";
 import { ITIP20 } from "tempo-std/interfaces/ITIP20.sol";
 import { IStablecoinDEX } from "tempo-std/interfaces/IStablecoinDEX.sol";
+import { IFeeManager } from "tempo-std/interfaces/IFeeManager.sol";
 import { StdPrecompiles } from "tempo-std/StdPrecompiles.sol";
 import { StdTokens } from "tempo-std/StdTokens.sol";
 import { RemoteMintRedeemHopTempo } from "src/contracts/hop/RemoteMintRedeemHopTempo.sol";
@@ -14,6 +15,11 @@ import { ILZEndpointDollar } from "src/contracts/interfaces/vendor/layerzero/ILZ
 
 interface ISendLibraryLike {
     function treasury() external view returns (address);
+}
+
+interface IOAppLike {
+    function owner() external view returns (address);
+    function setPeer(uint32 _eid, bytes32 _peer) external;
 }
 
 interface IEndpointLike {
@@ -331,8 +337,8 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
     ///      THIS contract's FeeManager binding, which used to be whatever the previous caller paid with. Had that
     ///      token later left the LZD whitelist with no DEX route out of it, every quote -- and so every
     ///      mintRedeem -- would have reverted before the re-bind could run, with no way back. The hop now
-    ///      re-binds to the current caller's token and quotes again when the OFT rejects the inherited binding,
-    ///      so it can never block the next call.
+    ///      binds the current caller's token before quoting whenever the inherited binding is no longer
+    ///      LZD-whitelisted, so it can never block the next call.
     function testFork_E2E_InheritedBindingCannotBlockNextCaller() public {
         uint256 amount = 10e6;
 
@@ -360,7 +366,7 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         vm.startPrank(user);
         ITIP20(frxUsd).approve(address(hop), amount);
         ITIP20(PATH_USD).approve(address(hop), 5e6);
-        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, 5e6); // reverted NoSwappableWhitelistedToken(USDC.e) without the retry
+        hop.mintRedeem(FRXUSD_OFT, amount, PATH_USD, 5e6); // reverted NoSwappableWhitelistedToken(USDC.e) without the re-bind
         vm.stopPrank();
 
         assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "hop re-bound to pathUSD");
@@ -372,6 +378,220 @@ contract RemoteMintRedeemHopTempoE2EForkTest is Test {
         MessagingFee memory q = hop.quote(FRXUSD_OFT, to, amount);
         assertGt(q.nativeFee, 0, "quote healthy again");
         vm.clearMockedCalls();
+    }
+
+    /// @dev ZELLIC-2AJ02J: a binding that was never set falls back to pathUSD in the FeeManager, which is
+    ///      whitelisted, so the hop must quote through it rather than re-bind to the caller's token first. The
+    ///      only FeeManager write is the post-collection bind to the token actually collected.
+    function testFork_E2E_UnsetBindingIsNotReboundBeforeQuote() public {
+        uint256 amount = 10e6;
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), address(0), "fresh hop has no binding");
+        assertTrue(lzd.isWhitelistedToken(PATH_USD), "pathUSD fallback is whitelisted");
+
+        // quote() already includes quoteHop(): it is the total the hop swaps for.
+        (address target, ) = _rawSwapQuote(frxUsd, uint128(hop.quote(FRXUSD_OFT, to, amount).nativeFee));
+
+        vm.expectCall(StdPrecompiles.TIP_FEE_MANAGER_ADDRESS, abi.encodeCall(IFeeManager.setUserToken, (frxUsd)), 0);
+        vm.expectCall(
+            StdPrecompiles.TIP_FEE_MANAGER_ADDRESS,
+            abi.encodeWithSelector(IFeeManager.setUserToken.selector),
+            1
+        );
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount + 10e6);
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, 10e6);
+        vm.stopPrank();
+
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), target, "bound once, to the collected token");
+    }
+
+    /// @dev ZELLIC-2AJ02J: an explicitly set binding that is still whitelisted is left alone too. The caller pays
+    ///      in a different token (frxUSD) and the hop still quotes through its existing binding; the only write
+    ///      is the post-collection bind, and only if the collected token differs from the one already bound.
+    function testFork_E2E_WhitelistedBindingIsNotReboundBeforeQuote() public {
+        uint256 amount = 10e6;
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(PATH_USD);
+
+        (address target, ) = _rawSwapQuote(frxUsd, uint128(hop.quote(FRXUSD_OFT, to, amount).nativeFee));
+
+        vm.expectCall(StdPrecompiles.TIP_FEE_MANAGER_ADDRESS, abi.encodeCall(IFeeManager.setUserToken, (frxUsd)), 0);
+        vm.expectCall(
+            StdPrecompiles.TIP_FEE_MANAGER_ADDRESS,
+            abi.encodeWithSelector(IFeeManager.setUserToken.selector),
+            target == PATH_USD ? 0 : 1
+        );
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount + 10e6);
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, 10e6);
+        vm.stopPrank();
+
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), target, "bound to the collected token");
+    }
+
+    /// @dev ZELLIC-2AJ02J: a quote failure unrelated to the binding -- here a missing peer -- reverts with the
+    ///      OFT's own error and never touches the FeeManager, even when the caller names a different fee token.
+    function testFork_E2E_UnrelatedQuoteFailureLeavesBindingAlone() public {
+        uint256 amount = 10e6;
+        vm.prank(IOAppLike(FRXUSD_OFT).owner());
+        IOAppLike(FRXUSD_OFT).setPeer(FRAXTAL_EID, bytes32(0));
+
+        vm.expectCall(
+            StdPrecompiles.TIP_FEE_MANAGER_ADDRESS,
+            abi.encodeWithSelector(IFeeManager.setUserToken.selector),
+            0
+        );
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount + 10e6);
+        vm.expectRevert(abi.encodeWithSignature("NoPeer(uint32)", FRAXTAL_EID));
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, 10e6);
+        vm.stopPrank();
+
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), address(0), "binding untouched");
+    }
+
+    /// @dev Delisted binding, caller paying in a token that is itself swapped (frxUSD): the hop binds frxUSD so
+    ///      the OFT's quote can price through it, collects via the DEX, then re-binds to the whitelisted token it
+    ///      bought. Two FeeManager writes in one transaction, both for the hop's own slot.
+    function testFork_E2E_DelistedBindingWithSwappedFeeToken() public {
+        uint256 amount = 10e6;
+
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+
+        // LayerZero delists USDC.e: it leaves the whitelist and the DEX has no route out of it.
+        address[] memory wl = lzd.getWhitelistedTokens();
+        address[] memory delisted = new address[](wl.length);
+        uint256 n;
+        for (uint256 i; i < wl.length; ++i) {
+            if (wl[i] != USDC_E) delisted[n++] = wl[i];
+        }
+        assembly {
+            mstore(delisted, n)
+        }
+        assertLt(n, wl.length, "USDC.e was whitelisted on this fork");
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.getWhitelistedTokens, ()), abi.encode(delisted));
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.isWhitelistedToken, (USDC_E)), abi.encode(false));
+        vm.mockCallRevert(
+            DEX,
+            abi.encodeWithSelector(IStablecoinDEX.quoteSwapExactAmountOut.selector, USDC_E),
+            abi.encodeWithSelector(IStablecoinDEX.InsufficientLiquidity.selector)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.NoSwappableWhitelistedToken.selector, USDC_E));
+        hop.quote(FRXUSD_OFT, to, amount);
+
+        uint256 hopFee = hop.quoteHop();
+        uint256 uFrx0 = _bal(frxUsd, user);
+        vm.expectCall(StdPrecompiles.TIP_FEE_MANAGER_ADDRESS, abi.encodeCall(IFeeManager.setUserToken, (frxUsd)), 1);
+        vm.startPrank(user);
+        ITIP20(frxUsd).approve(address(hop), amount + 10e6);
+        hop.mintRedeem(FRXUSD_OFT, amount, frxUsd, 10e6);
+        vm.stopPrank();
+
+        address bound = StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop));
+        assertTrue(bound != USDC_E && bound != frxUsd, "re-bound past frxUSD to the token bought");
+        assertTrue(lzd.isWhitelistedToken(bound), "final binding is whitelisted");
+        assertEq(_bal(bound, address(hop)), hopFee, "hop retains quoteHop() in the token bought");
+        assertGt(uFrx0 - _bal(frxUsd, user), amount, "fee paid in frxUSD on top of the amount");
+        assertEq(_bal(frxUsd, address(hop)), 0, "no frxUSD stranded on hop");
+
+        assertGt(hop.quote(FRXUSD_OFT, to, amount).nativeFee, 0, "quote healthy again");
+        vm.clearMockedCalls();
+    }
+
+    // ───────────────────────── rebindFeeTokenIfDelisted ─────────────────────────
+
+    /// @dev While the binding is whitelisted -- or unset, which resolves to whitelisted pathUSD -- the public
+    ///      reset does nothing and makes no FeeManager write.
+    function testFork_E2E_RebindIsNoOpWhileWhitelisted() public {
+        vm.prank(makeAddr("anyone"));
+        assertFalse(hop.rebindFeeTokenIfDelisted(), "unset binding: nothing to do");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), address(0), "still unset");
+
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+        vm.expectCall(
+            StdPrecompiles.TIP_FEE_MANAGER_ADDRESS,
+            abi.encodeWithSelector(IFeeManager.setUserToken.selector),
+            0
+        );
+        vm.prank(makeAddr("anyone"));
+        assertFalse(hop.rebindFeeTokenIfDelisted(), "whitelisted binding: nothing to do");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), USDC_E, "binding untouched");
+    }
+
+    /// @dev Delisted, unroutable binding: the quote views revert, and anyone holding nothing can clear it with
+    ///      one call. The hop lands on the first whitelisted token and every quote works again.
+    function testFork_E2E_RebindClearsDelistedBindingWithoutFunds() public {
+        uint256 amount = 10e6;
+        address[] memory remaining = _delistUsdcE();
+
+        vm.expectRevert(abi.encodeWithSelector(TempoGasTokenBase.NoSwappableWhitelistedToken.selector, USDC_E));
+        hop.quote(FRXUSD_OFT, to, amount);
+
+        address keeper = makeAddr("keeper");
+        assertEq(_bal(PATH_USD, keeper) + _bal(USDC_E, keeper) + _bal(frxUsd, keeper), 0, "keeper holds nothing");
+        vm.prank(keeper);
+        assertTrue(hop.rebindFeeTokenIfDelisted(), "rebound");
+
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), remaining[0], "first whitelisted token");
+        assertGt(hop.quote(FRXUSD_OFT, to, amount).nativeFee, 0, "quote works again");
+        assertGt(hop.quoteUserTokenFee(FRXUSD_OFT, to, amount, PATH_USD), 0, "user-token quote works again");
+
+        vm.prank(keeper);
+        assertFalse(hop.rebindFeeTokenIfDelisted(), "second call does nothing");
+        vm.clearMockedCalls();
+    }
+
+    /// @dev A whitelist entry the FeeManager refuses (not a USD TIP20) is skipped; with nothing bindable the
+    ///      call reverts NoBindableWhitelistedToken instead of reporting success.
+    function testFork_E2E_RebindSkipsTokensFeeManagerRejects() public {
+        _delistUsdcE();
+        // A deployed contract that is not a TIP20 (the LZ endpoint dollar itself): the FeeManager refuses it
+        // even though it has code, so only the try/catch can step past it.
+        address notTip20 = address(lzd);
+        assertGt(notTip20.code.length, 0, "rejected entry has code");
+
+        address[] memory list = new address[](2);
+        list[0] = notTip20;
+        list[1] = PATH_USD;
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.getWhitelistedTokens, ()), abi.encode(list));
+        assertTrue(hop.rebindFeeTokenIfDelisted(), "rebound past the rejected entry");
+        assertEq(StdPrecompiles.TIP_FEE_MANAGER.userTokens(address(hop)), PATH_USD, "bound to the next entry");
+
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+        address[] memory onlyBad = new address[](1);
+        onlyBad[0] = notTip20;
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.getWhitelistedTokens, ()), abi.encode(onlyBad));
+        vm.expectRevert(TempoGasTokenBase.NoBindableWhitelistedToken.selector);
+        hop.rebindFeeTokenIfDelisted();
+        vm.clearMockedCalls();
+    }
+
+    /// @dev Binds the hop to USDC.e, then delists it: off the whitelist (and out of the list) with no DEX route.
+    function _delistUsdcE() internal returns (address[] memory remaining) {
+        vm.prank(address(hop));
+        StdPrecompiles.TIP_FEE_MANAGER.setUserToken(USDC_E);
+
+        address[] memory wl = lzd.getWhitelistedTokens();
+        remaining = new address[](wl.length);
+        uint256 n;
+        for (uint256 i; i < wl.length; ++i) {
+            if (wl[i] != USDC_E) remaining[n++] = wl[i];
+        }
+        assembly {
+            mstore(remaining, n)
+        }
+        assertLt(n, wl.length, "USDC.e was whitelisted on this fork");
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.getWhitelistedTokens, ()), abi.encode(remaining));
+        vm.mockCall(address(lzd), abi.encodeCall(ILZEndpointDollar.isWhitelistedToken, (USDC_E)), abi.encode(false));
+        vm.mockCallRevert(
+            DEX,
+            abi.encodeWithSelector(IStablecoinDEX.quoteSwapExactAmountOut.selector, USDC_E),
+            abi.encodeWithSelector(IStablecoinDEX.InsufficientLiquidity.selector)
+        );
     }
 
     // ───────────────────────── capped, token-explicit overload ─────────────────────────

@@ -81,6 +81,14 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         _setFeeSwapSlippageBps(_bps);
     }
 
+    /// @notice Moves this hop's fee token back onto the LayerZero whitelist if LayerZero has delisted it.
+    ///         While the hop is bound to a delisted token the DEX cannot route out of, the quote views
+    ///         revert; one call here, by anyone and with no funds, makes them work again. Does nothing,
+    ///         and returns false, while the hop's fee token is whitelisted.
+    function rebindFeeTokenIfDelisted() external returns (bool rebound) {
+        return _rebindFeeTokenIfDelisted();
+    }
+
     /// @notice Sweep a token held here -- the retained return-leg fees (pathUSD / USDC.e / USDT0) or
     ///         anything stranded. Same signature as every other chain's hop, with the transfer checked.
     function recoverERC20(address tokenAddress, address recipient, uint256 tokenAmount) external override onlyOwner {
@@ -144,7 +152,7 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         uint256 _maxFeeTokenAmount
     ) internal virtual {
         SendParam memory sendParam = _generateSendParam({ _to: _to, _amountLD: _amountLD, _minAmountLD: _amountLD });
-        MessagingFee memory fee = _quoteSendRebindingOnFailure(_oft, sendParam, _feeToken);
+        MessagingFee memory fee = _quoteSendRebindingIfDelisted(_oft, sendParam, _feeToken);
 
         // Collect the outbound fee and the retained return-leg estimate in one debit of the fee token,
         // so there is a single fee pull and no native refund to hand back.
@@ -159,30 +167,29 @@ contract RemoteMintRedeemHopTempo is RemoteMintRedeemHop, TempoGasTokenBase {
         IOFT(_oft).send(sendParam, fee, address(this));
     }
 
-    /// @dev The OFT's quote validates THIS contract's FeeManager binding, which is whatever the previous
-    ///      call paid with. Normally that token is still LZ-whitelisted and the quote just works. If
-    ///      LayerZero has since delisted it and the DEX has no route out of it, the quote reverts -- so
-    ///      re-bind to the token this call pays with (as FraxOFTWalletUpgradeableTempo does up front) and
-    ///      quote again. Free on the happy path; an inherited binding can never wedge the hop.
-    function _quoteSendRebindingOnFailure(
+    /// @dev The OFT's quote validates THIS contract's FeeManager binding: whatever the previous call paid
+    ///      with, or pathUSD if none was ever set. A successful call always leaves a whitelisted token
+    ///      bound, so the binding only goes bad if LayerZero has since delisted it -- and if the DEX has no
+    ///      route out of it either, the quote reverts and the hop would stay wedged. So when the bound
+    ///      token is no longer whitelisted, bind the token this call pays with (the call binds the token
+    ///      it collects afterwards anyway) before quoting. This reads the same whitelist the OFT checks, so
+    ///      it cannot drift from the OFT's error names; any other quote failure reverts with the OFT's own
+    ///      error and leaves the binding alone.
+    function _quoteSendRebindingIfDelisted(
         address _oft,
         SendParam memory _sendParam,
         address _feeToken
-    ) internal returns (MessagingFee memory fee) {
-        try IOFT(_oft).quoteSend(_sendParam, false) returns (MessagingFee memory _fee) {
-            return _fee;
-        } catch {
-            _bindFeeToken(_feeToken);
-            return IOFT(_oft).quoteSend(_sendParam, false);
-        }
+    ) internal returns (MessagingFee memory) {
+        if (!nativeToken.isWhitelistedToken(feeTokenOf(address(this)))) _bindFeeToken(_feeToken);
+        return IOFT(_oft).quoteSend(_sendParam, false);
     }
 
     /// @notice Fee a caller must hold and approve in `_userToken` to bridge `_amountLD` (on top of
     ///         `_amountLD` itself when `_userToken` is the bridged token).
     /// @dev `quote()` reports the fee in endpoint-native (LZD) units; UIs need the figure in whichever
     ///      TIP20 the user actually pays with, which is what this converts to. Pass the token the call
-    ///      will use: the `_feeToken` argument of the four-argument `mintRedeem`, or `feeTokenOf(caller)`
-    ///      for the two-argument one. For a token that must be swapped the figure includes the fee-swap
+    ///      will use: the `_feeToken` argument of `mintRedeem` (`feeTokenOf(caller)` when defaulting to the
+    ///      caller's FeeManager token). For a token that must be swapped the figure includes the fee-swap
     ///      slippage allowance; the part the swap does not consume is refunded in the same call, so the
     ///      net debit is at most this amount -- and it is the figure `_maxFeeTokenAmount` is checked against.
     function quoteUserTokenFee(
