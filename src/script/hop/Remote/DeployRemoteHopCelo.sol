@@ -9,6 +9,8 @@ import { DeployRemoteHop } from "./DeployRemoteHop.sol";
 //
 // Dry run:  forge script src/script/hop/Remote/DeployRemoteHopCelo.sol --rpc-url https://forno.celo.org --evm-version shanghai --gcp --sender 0x54f9b12743a7deec0ea48721683cbebedc6e17bc
 // Broadcast: forge script src/script/hop/Remote/DeployRemoteHopCelo.sol --rpc-url https://forno.celo.org --evm-version shanghai --gcp --sender 0x54f9b12743a7deec0ea48721683cbebedc6e17bc --broadcast
+//
+// Deployed: 0x3Fe759e54D619a655650ac64622aCE94BD6b6394 (Celoscan verified; Sourcify v2: creation + runtime match)
 contract DeployRemoteHopCelo is DeployRemoteHop {
     constructor() {
         EXECUTOR = 0x1dDbaF8b75F2291A97C22428afEf411b7bB19e28;
